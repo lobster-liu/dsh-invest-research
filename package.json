@@ -1,0 +1,43 @@
+{
+  "name": "dsh-stock-research",
+  "version": "0.1.0",
+  "description": "Multi-agent A-share research pipeline skill for DeepSeek Harness — 6 roles (orchestrator / data / policy / valuation / risk / auditor), source-cited reports, percentile & drawdown tooling, and a pre-write PII gate.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "assets",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19 || >=24"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "skill",
+    "stock",
+    "a-share",
+    "multi-agent",
+    "research"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lobster-liu/dsh-stock-research.git"
+  }
+}

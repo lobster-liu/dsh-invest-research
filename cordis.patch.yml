@@ -1,0 +1,9 @@
+# dsh bundle layer: mount the stock-research skill plugin.
+#
+# Install:
+#   dsh plugin --profile <name> add github:<user>/dsh-stock-research
+# DSH activates only direct dependencies' bundle layers — one line is enough:
+# this plugin has zero runtime dependencies.
+- insert:
+    - id: stock-research
+      name: dsh-stock-research
