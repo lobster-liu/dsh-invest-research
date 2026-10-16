@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 — 2026-10-16
+- **修复真宿主上 skill 无法加载**(`skill "stock-research" is unknown or no longer
+  available`)。根因是提供者契约理解错误:宿主注册表取正文时调用的是
+  `provider.get(candidate, options)`(**candidate 对象**,见 `@deepseek-ai/dsh-skill`
+  的 `match.provider.get(match.candidate, options)`),而 `get()` 却把入参当**字符串**
+  与技能名比较,恒不相等 → 恒返回 `undefined` → 工具报"unknown or no longer available"。
+  现在同时接受 candidate 对象与纯名字两种形态。
+- **回归测试补齐**:`test/smoke.mjs` 新增 `get(candidate)` 与"外部 candidate"两个用例
+  (11/11)。原来只用字符串调用 `get()`,所以这个 bug 在 9/9 全绿下漏过了宿主验证。
+
 ## 0.2.0 — 2026-10-16
 - **akshare 财务基本面通道**（本次核心新增，直接命中 v0.1.0 两次实测的数据缺口）：
   - `tools/fetch_fundamentals.py`:akshare 取财务分析指标(ROE/每股净资产/资产负债率/

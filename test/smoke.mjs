@@ -52,9 +52,16 @@ const { registerSkillWhenAvailable, createSkillProvider, readSkill, parseSkillFi
   const list = await provider.list();
   ok('T1 list name=stock-research', list.length === 1 && list[0].name === 'stock-research');
   ok('T1 rank=600 source=bundled', list[0].rank === 600 && list[0].source === 'bundled');
+  // The real Host calls get(candidate) with the Candidate object it kept from
+  // list() (dsh-skill/lib/index.js: `match.provider.get(match.candidate, options)`).
+  // Testing only the string form hid a bug that made the skill unresolvable
+  // ("unknown or no longer available") on the live Host.
+  const gotByCandidate = await provider.get(list[0]);
+  ok('T1 get(candidate) has body', !!gotByCandidate && gotByCandidate.content.includes('多智能体'));
   const got = await provider.get('stock-research');
   ok('T1 get() has body', !!got && got.content.includes('多智能体'));
   ok('T1 get() unknown name -> undefined', (await provider.get('nope')) === undefined);
+  ok('T1 get() foreign candidate -> undefined', (await provider.get({ name: 'other-skill' })) === undefined);
   const skill = readSkill(SKILL_DIR);
   ok('T1 description loaded', skill.description.length > 30);
 }
