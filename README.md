@@ -35,6 +35,9 @@ python assets/skills/stock-research/tools/test_gate.py
 | `assets/skills/stock-research/SKILL.md` | 流程总纲 + 环境解析(`EQUITY_PY` / `EQUITY_SECRET_SCANNER` / `$RUN` / `$ARCHIVE`) |
 | `roles/*.md` ×6 | 各角色完整提示词(含 2026-10-15 真实事故教训固化:单一数据源、口径并列、先落盘再细化) |
 | `tools/fetch_data.py` | 东财双通道行情/历史取数 + 分位/最大回撤衍生计算;**空数据退出码 1** |
+| `tools/fetch_fundamentals.py` | **(v0.2.0)** 可选 akshare 财务基本面通道:ROE/每股净资产/负债率/现金流 + PE·PB 近一年真分位;未装 akshare 时退出码 1 不阻断主流程 |
+| `install_akshare.ps1` | **(v0.2.0)** 沙箱内离线装 akshare(Node fetch 下 wheel + `--no-index --find-links`),绕开 pip 平台临时目录 `WinError 5` 与 schannel 两个坑 |
+| `requirements.txt` | **(v0.2.0)** akshare 1.19.1 实测通过的依赖版本 |
 | `tools/sanitize_check.py` | 落盘前 PII 门禁:5 类泄漏规则 + 4 层公开信息白名单(财报科目/政策条款/金融术语/否定声明);混合陷阱必拦 |
 | `tools/test_gate.py` | 门禁行为自检(真泄漏必拦/公开条款必放/陷阱必拦) |
 | `tools/run_pipeline.ps1` | Windows PowerShell 引导脚本(ASCII-only,PS 5.1 兼容) |

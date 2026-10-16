@@ -14,7 +14,7 @@ description: 多智能体协同的 A 股行情分析流水线。6 角色（协�
 
 ## 环境解析（执行任何命令前先做一次，全程复用）
 - `$BASE`   —— 本 skill 的 base 目录（DSH 加载 skill 时会在提示中给出）
-- `$TOOLS`  = `$BASE/tools`（fetch_data.py / sanitize_check.py / run_pipeline.ps1 均在此，**产物绝不写入插件目录**）
+- `$TOOLS`  = `$BASE/tools`（fetch_data.py / fetch_fundamentals.py / sanitize_check.py / run_pipeline.ps1 均在此，**产物绝不写入插件目录**）
 - `$PY`     —— Python 解释器，按优先级：
   1. 环境变量 `EQUITY_PY`；
   2. DSH 自带运行时 `%DSH_HOME%\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe`（Windows，有 numpy/pandas）；
@@ -56,6 +56,9 @@ New-Item -ItemType Directory -Path $RUN -Force
 - 数据员：读 `roles/data.md`。先调取数器：
   `& "$PY" "$TOOLS/fetch_data.py" --code <代码> --out "$RUN/data.json" --history-days 1300`
   （**退出码 1 = 全通道失败，禁止带空数据继续**；财务科目缺失按 data.md 的 read.fetch 指引补，见环境限制节）
+  **若已装 akshare**，紧接着取基本面（可选增强，退出码 1 不阻断主流程）：
+  `& "$PY" "$TOOLS/fetch_fundamentals.py" --code <代码> --out "$RUN/fundamentals.json"`
+  取到的 ROE / 每股净资产 / 资产负债率 / 现金流 / PE·PB 分位可显著减少「数据缺口」。
 - 政策员：读 `roles/policy.md`，官网站内检索 + `read.fetch` 抓原文。
 
 ### 3. 阶段二：审计员第一轮（**不可跳过**）
@@ -92,7 +95,16 @@ New-Item -ItemType Directory -Path $RUN -Force
    - **`read.fetch`：极可靠**，直连官网原文——主路径；
    - **`search.run`：仅辅助**，中文政府站点覆盖差（`site:pbc.gov.cn` 硬约束 0 结果），且其"needs covered N/N"为启发式假阳性，结论必须回原文核实。
 2. **行情接口间歇性不可达**（网络中间层干扰时 `fetch_data.py` 会 FAILED）。→ 脚本自带重试+双通道+**空数据退出码 1**；失败时终止报告"数据缺口"，不要带空跑。
-3. **akshare 不建议安装**（依赖树巨大、长时无进度；HTTP 兜底通道零依赖可用）。`fetch_data.py` 的 akshare 路径保留，装了即自动启用。
+3. **akshare 已可离线安装（v0.2.0 起）**。DSH 沙箱会拦截 pip 在平台临时目录里的
+   build/unpack 操作（`WinError 5 拒绝访问`），因此**不要**直接 `pip install akshare`。
+   用随包脚本一次装成（Node fetch 下载 wheel + 本地离线安装，避开平台 temp）：
+   ```powershell
+   & "$BASE/install_akshare.ps1" -VenvPython <venv 的 python.exe> -WheelsDir <工作区内目录>
+   ```
+   装成后 `tools/fetch_fundamentals.py` 可用（财务分析指标 22×86 / 财务摘要 80×88 /
+   PE·PB 近一年真分位）。**未装 akshare 时该脚本退出码 1 并说明原因，其余流程照常跑。**
+   已知限制：akshare 1.19.x 已移除银行监管指标接口（不良率/拨备覆盖率/资本充足率），
+   这些字段请用 `fetch_data.py` 的 HTTP 通道或列为数据缺口。
 4. **子代理核算类任务必须"先落盘再细化"**（真实教训：两个子代理反复试算、不落盘、耗尽上下文后成果全丢，见 LESSONS.md）。派发时明确要求：先写结论文件（可标注"核算中"），再继续补充。
 
 ## 数据质量红线（来自 LESSONS 的浓缩版）

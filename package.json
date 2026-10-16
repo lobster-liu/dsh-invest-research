@@ -1,7 +1,7 @@
 {
   "name": "dsh-stock-research",
-  "version": "0.1.0",
-  "description": "Multi-agent A-share research pipeline skill for DeepSeek Harness — 6 roles (orchestrator / data / policy / valuation / risk / auditor), source-cited reports, percentile & drawdown tooling, and a pre-write PII gate.",
+  "version": "0.2.0",
+  "description": "Multi-agent A-share research pipeline skill for DeepSeek Harness — 6 roles (orchestrator / data / policy / valuation / risk / auditor), source-cited reports, percentile & drawdown tooling, an optional akshare fundamentals channel (sandbox-safe offline installer), and a pre-write PII gate.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
