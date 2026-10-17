@@ -1,7 +1,7 @@
 {
-  "name": "dsh-stock-research",
-  "version": "0.2.1",
-  "description": "Multi-agent A-share research pipeline skill for DeepSeek Harness — 6 roles (orchestrator / data / policy / valuation / risk / auditor), source-cited reports, percentile & drawdown tooling, an optional akshare fundamentals channel (sandbox-safe offline installer), and a pre-write PII gate.",
+  "name": "dsh-invest-research",
+  "version": "0.3.0",
+  "description": "Multi-agent equity & fund research skill bundle for DeepSeek Harness — two skills: stock-research (6-role A-share pipeline) and fund-research (7-role fund look-through pipeline with 10-section reports), source-cited data, multi-channel fetchers, and a shared pre-write PII gate.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -27,6 +27,8 @@
     "deepseek-harness",
     "skill",
     "stock",
+    "fund",
+    "etf",
     "a-share",
     "multi-agent",
     "research"
@@ -38,6 +40,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lobster-liu/dsh-stock-research.git"
+    "url": "git+https://github.com/lobster-liu/dsh-invest-research.git"
   }
 }

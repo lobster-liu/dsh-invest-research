@@ -16,7 +16,7 @@ if (-not $PY) { Write-Host '[FAIL] python not found (set EQUITY_PY)'; exit 2 }
 # Tools dir: EQUITY_TOOLS or alongside this script
 if ($env:EQUITY_TOOLS) { $TOOLS = $env:EQUITY_TOOLS } else { $TOOLS = $PSScriptRoot }
 $runid = $Code + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
-$RUN = Join-Path (Get-Location).Path ('equity-runs' + $runid)
+$RUN = Join-Path (Join-Path (Get-Location).Path 'equity-runs') $runid
 New-Item -ItemType Directory -Path $RUN -Force | Out-Null
 Write-Host ('runid : ' + $runid)
 Write-Host ('run   : ' + $RUN)

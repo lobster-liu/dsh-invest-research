@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   在 DSH 沙箱内离线安装 akshare 及依赖到指定 venv。
@@ -10,7 +10,9 @@
   2. 把 wheel 放到工作区内
   3. 用 --no-index --find-links 本地离线安装（pip 不再建平台临时目录）
 
-  实测在 DSH workspace-write 沙箱下 100% 通过（2026-10-16）。
+  实测在 DSH workspace-write 沙箱下 100% 通过（2026-10-16，pwsh 7.x 宿主）。
+  注意：本文件为 UTF-8 with BOM —— PS 5.1 按 GBK 解码无 BOM 的中文串会 parse 失败，
+  改动后必须保持 BOM（v0.3.0 修复，2026-10-17 复核发现）。
 
 .PARAMETER VenvPython
   目标 venv 的 python.exe 全路径。
@@ -29,15 +31,37 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# 找 DSH 自带 node（v24，有 zlib.zstdDecompressSync 和 fetch）
-$dshNode = $null
-foreach ($cand in @(
-  'D:\Users\KHADAS\AppData\Local\Programs\DeepSeek Harness\resources\runtime\primary-runtime\dependencies\node\bin\node.exe',
-  "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\primary-runtime\dependencies\node\bin\node.exe"
-)) {
-  if (Test-Path $cand) { $dshNode = $cand; break }
+# 找 node（v24+，有 zlib.zstdDecompressSync 和 fetch）。查找次序：
+#   1. $env:NODE（显式指定）
+#   2. DSH 自带 runtime（按 DSH_HOME 推断，Windows 布局）
+#   3. $env:LOCALAPPDATA 下 DSH 安装候选（不硬编码用户名）
+#   4. PATH 上的 node
+$nodeExe = $null
+if ($env:NODE -and (Test-Path $env:NODE)) { $nodeExe = $env:NODE }
+if (-not $nodeExe -and $env:DSH_HOME) {
+  foreach ($cand in @(
+    (Join-Path $env:DSH_HOME 'runtimes\primary-runtime\dependencies\node\bin\node.exe'),
+    (Join-Path $env:DSH_HOME 'runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe'),
+    (Join-Path $env:DSH_HOME 'dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe')
+  )) { if (Test-Path $cand) { $nodeExe = $cand; break } }
 }
-if (-not $dshNode) { throw 'DSH bundled node.exe not found' }
+if (-not $nodeExe) {
+  $laCand = Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\resources\runtime\primary-runtime\dependencies\node\bin\node.exe'
+  if (Test-Path $laCand) { $nodeExe = $laCand }
+}
+if (-not $nodeExe) {
+  $cmd = Get-Command node -ErrorAction SilentlyContinue
+  if ($cmd) { $nodeExe = $cmd.Source }
+}
+if (-not $nodeExe) {
+  throw @'
+node.exe not found. Fix one of these then retry:
+  - set $env:NODE = <path to node.exe>          (explicit)
+  - set $env:DSH_HOME = <DSH home dir>          (DSH bundled runtime)
+  - install Node.js 24+ and put it on PATH
+'@
+}
+$dshNode = $nodeExe
 
 New-Item -ItemType Directory -Force $WheelsDir | Out-Null
 $dlScript = Join-Path $WheelsDir 'dlwheels.js'

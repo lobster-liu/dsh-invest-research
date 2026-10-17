@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.3.0 — 2026-10-17
+- **修复外部复核（Qoder 侧）发现的 3 项问题**：
+  - **P1（阻断）** `install_akshare.ps1` 原为 UTF-8 无 BOM，PowerShell 5.1 按 GBK 解码中文串
+    导致 parse 失败（line 100「字符串缺少终止符」）——加 UTF-8 BOM 修复，`ParseFile` 复验 0 错。
+    ⚠️ 维护约定：**该文件含中文，任何后续编辑保存都必须保持 BOM**（本次修复中内容改完
+    BOM 又被无 BOM 工具冲掉过一次，靠复验抓回）；`run_pipeline.ps1` 保持 ASCII-only 无需 BOM。
+    原注释「实测 100% 通过（2026-10-16）」已更正为 pwsh 7.x 宿主实测——5.1 宿主此前连 parse
+    都过不去，该声明对 5.1 不成立。
+  - **P2（功能）** `run_pipeline.ps1` run 目录拼接错误：`'equity-runs' + $runid` 粘连成
+    `equity-runs600048-…`，缺中间层级 → 改为 `Join-Path (Join-Path … 'equity-runs') $runid`，
+    与 SKILL.md 的 `<工作区>\equity-runs\<标的>-<时间戳>\` 约定一致。
+  - **P3（发布）** `install_akshare.ps1` 删除硬编码个人绝对路径（泄露用户名/安装位置且他机必失败），
+    node 探测改为四级查找：`$env:NODE` → `$env:DSH_HOME` 下自带 runtime（3 种 Windows 布局）→
+    `$env:LOCALAPPDATA` 候选 → PATH；全部取不到则 throw 并列出三种可执行修法。
+- **包名改为 `dsh-invest-research`**（原 `dsh-stock-research`）：v0.3.0 加入基金研究能力后，
+  旧名已不能覆盖 `fund-research` skill。两个 skill 名不变（`stock-research` / `fund-research`），
+  插件层统一为单一 provider `dsh-invest-research`。GitHub 仓库同步改名后旧地址
+  自动 301 重定向；已安装旧版的请移除后按新名重装。
+- **新增第二个 skill `fund-research`（基金穿透式研究流水线）**，与 `stock-research` 同包发布、
+  共用同一套 PII 门禁与环境约定。7 角色：协调员 + Agent1 基金画像与持仓穿透 / Agent2 宏观政策 /
+  Agent3 行业趋势 / Agent4 重仓公司与估值 / Agent5 基金管理与绩效 / Agent6 风险与反方审查。
+  五阶段流程：身份与基准日 → 冻结共享事实底稿 → 四路并行独立初稿（互不引用防锚定）→
+  反方审查 + 定向补证一次 → 协调员按证据质量裁决（不按多数投票、保留分歧）。
+  固定 10 章报告 + 5 个结论标签 + 三种情景 + 5–8 项跟踪清单 + 条件式行动参考。
+- **`lib/skill.js` 泛化为多 skill 注册**：`registerSkillsWhenAvailable(ctx, dirs)` 按目录批量注册，
+  两个 skill 统一归属 provider `dsh-invest-research`（`PLUGIN_NAME` 常量，不再按目录名推导）；
+  单个 SKILL.md 损坏只 warn，其余照常注册；
+  保留 `registerSkillWhenAvailable()` 单 skill 兼容入口。`test/smoke.mjs` 扩到 21 条断言
+  （两 skill 独立注册 / 无 skills 服务降级 / 坏文件隔离 / provider 不串台）。
+- **`assets/skills/fund-research/tools/fetch_fund.py`**（新增）：基金身份、净值序列、多期持仓、
+  行业配置、债券持仓、规模份额、持有人结构、资产配置、基金经理、申赎状态、基准对比、
+  重仓股快照。多通道降级（东财 pingzhongdata / 基金主页 / f10 归档 / 腾讯行情），
+  取不到即列「未取得的指标」，**空数据退出码 1**。
+  实测修掉的坑：① 东财时间戳是北京时间的当日零点，取 UTC 会整体错一天，
+  导致净值与指数错位、跟踪误差/捕获率失真（已 +8h）；
+  ② f10 报告期优先取页面「截止至：YYYY-MM-DD」，比从「2026年2季度」推算可靠；
+  ③ 季度披露 >20 条判为半年报/年报全量，否则只是前十大；
+  ④ `--history-days` 默认 0（全部历史），否则「成立以来」会静默退化成样本区间
+     （另修 `_days_between` 返回 0 被 `or 999` 吞掉的 falsy-zero bug——净值首日恰为成立日时
+     正是最该标「成立以来」的情况，却总被错标成「样本区间」）；
+  ⑤ 联接/FOF 显式标注「f10 股票持仓不含目标 ETF 与子基金」，防重复计入；
+  ⑥ 主页持仓无显式报告期时的推断：只认「季度末 + 25 日历日 ≤ 最新净值日」的最新季度末
+     （正推最近的季度末会在 10 月中旬得出尚未披露的三季报 09-30，实际持仓是 06-30 的）。
+- **`tools/test_fund_tools.py`**（新增）：30 条离线断言（内联 fixture + 网络桩 + 绊线，
+  零网络），覆盖解析、陈旧判定、f10 解析、区间/年化/回撤/分位/基准对比。
+- **`sanitize_check.py` 扩展**：新增基金公开披露白名单（净值/阶段收益/规模/份额/持有人/
+  资产配置/跟踪误差/持仓占比/重仓股估值等），并把「公司盈利」等公司层面表述与
+  第一人称盈亏区分开（真泄漏仍必拦）。`test_gate.py` 从 15 场景扩到 27 场景，含 D 组
+  「基金公开披露必放」与「公司豁免不得掩护第一人称盈亏」混合陷阱。
+
 ## 0.2.1 — 2026-10-16
 - **修复真宿主上 skill 无法加载**(`skill "stock-research" is unknown or no longer
   available`)。根因是提供者契约理解错误:宿主注册表取正文时调用的是
