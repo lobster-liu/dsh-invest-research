@@ -7,9 +7,14 @@
  */
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
-const ROOT = (process.argv[2] ?? '.').replace(/\\/g, '/');
+// 默认仓库根 = 本脚本所在目录的上一级（不依赖 cwd，也不拼出非法 file:// URL；
+// Qoder 复核发现的坑：ROOT='.' 时 'file://'+'./lib/skill.js' 的 host 段是 '.'）
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_ROOT = resolve(HERE, '..');
+const ROOT = (process.argv[2] ?? DEFAULT_ROOT).replace(/\\/g, '/');
 // 生产路径约定: skill.js 收到的是以 / 结尾的普通文件系统路径(与 fileURLToPath 输出一致)
 const SKILLS_ROOT = ROOT + '/assets/skills/';
 const STOCK_DIR = SKILLS_ROOT + 'stock-research/';
@@ -45,7 +50,7 @@ function makeCtx({ withSkills = true } = {}) {
 
 const { registerSkillsWhenAvailable, registerSkillWhenAvailable, createSkillProvider,
         readSkill, parseSkillFile, SKILL_DIRS, providerNameFor } =
-  await import('file://' + (ROOT + '/lib/skill.js').replace(/\\/g, '/'));
+  await import(pathToFileURL(resolve(ROOT, 'lib/skill.js')).href);
 
 // ---- T1 正常宿主：两个 skill 都注册 ----
 {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 — 2026-10-17
+- **修复 `test/smoke.mjs` 裸跑必挂**（Qoder 侧复核发现）：ROOT 默认 `'.'` 时
+  `'file://' + './lib/skill.js'` 拼出 host 段为 `.` 的非法 file URL → `ERR_MODULE_NOT_FOUND`，
+  只有传绝对路径才能跑出 21 条断言，换机器/换 shell 极易误判"测试挂了"。
+  修法：默认仓库根由 `import.meta.url` 反推（不依赖 cwd），动态 import 改用
+  `pathToFileURL(resolve(...)).href`；package.json 加 `"scripts": { "test": "node test/smoke.mjs" }`
+  作为可执行入口（`npm test`、仓库内任意位置裸跑、显式传路径三种方式均验证通过）。
+  仅动 `test/smoke.mjs` + `package.json`（version/scripts 两处），运行时代码与取数/门禁脚本零改动。
+
 ## 0.3.0 — 2026-10-17
 - **修复外部复核（Qoder 侧）发现的 3 项问题**：
   - **P1（阻断）** `install_akshare.ps1` 原为 UTF-8 无 BOM，PowerShell 5.1 按 GBK 解码中文串
