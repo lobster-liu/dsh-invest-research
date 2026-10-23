@@ -4,3 +4,5 @@ __pycache__/
 equity-runs/
 *.egg-info/
 .DS_Store
+# 测试临时目录（DSH 沙箱把插件目录设只读时 test_peer_tools 的 fixture 可能残留空目录）
+.peer_test_*/

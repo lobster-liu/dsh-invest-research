@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.4.0 — 2026-10-23
+- **新增 `fund-research` 对比层（阶段 6，跨基金同业对比）**：给定锚点 + 候选同业，先由
+  `peer_builder.py` 按「跟踪标的一致 + 被动属性 + 同份额类别 + 开放申购」筛出合法同业
+  （**只筛不评**，不构成"谁更优"的判断），再由**具备 spawn 能力的协调员亲自派发**
+  互相隔离的独立角色 agent 做跨基金对比（宏观/行业/估值/绩效各一，互不共享结论防锚定），
+  最后由独立 `peer-red-team` 逐条质疑、协调员按证据质量裁决。
+- **新增 3 个角色文件**：`roles/peer-orchestrator.md`（对比协调员）、
+  `roles/peer-builder.md`（同业筛选，只筛不评）、`roles/peer-red-team.md`（对比反方审查：
+  同源假验证 / 样本冒充全组合 / 循环论证 / 被忽略的反向证据）。
+- **新增 2 个工具**：`tools/peer_builder.py`（同业筛选器）、`tools/comparator.py`
+  （对比矩阵生成器，读 `peers.json` + 各基金 `report.md`/`fund.json`，**不重算指标**、
+  只对齐已冻结结论并暴露口径冲突）。
+- **新增 `tools/test_peer_tools.py`**：对比层 10 条离线断言，覆盖 peer_builder 的
+  跟踪标的解析/被动判定/份额类别/结构判定与 comparator 的报告标签提取/对比矩阵构建
+  （零网络，fixture 用工作区临时目录——不用 `%TEMP%`，DSH 沙箱拒绝平台临时目录，
+  且 `tempfile.mkdtemp` 建的目录在 Windows 下 ACL 不允许再建子目录）。
+- **SKILL.md 新增铁律 11（对比层细则）**：跨基金对比必须由具备 spawn 能力的协调者
+  亲自派发互相隔离的独立角色 agent + 独立 red-team；**不得把对比层交给无法派生子代理的
+  执行者，否则退化为单模型自证**——此时必须如实声明，不得声称真实多智能体。
+- **修 `peer_builder.py` 两个坑**（2026-10-22 实测踩到）：① 搜索候选全量抓跟踪标的过慢
+  → 改为**逐只只抓锚点** + 候选仅在名字含目标关键词时抓；② 同名不同份额误判同业
+  → 显式校验份额类别 + 标记结构差异为"不可比较维度"。
+- **发布合规（第三方插件市场标准）**：
+  - `package.json` 补 `author` / `homepage` / `bugs` / `publishConfig.access`；
+  - `LICENSE` 版权方由旧包名 `dsh-stock-research contributors` 同步为 `dsh-invest-research contributors`；
+  - `cordis.patch.yml` 与 `README.md` 的 `github:<user>/...` 占位符改为真实仓库
+    `github:lobster-liu/dsh-invest-research`；
+  - `.npmignore` 与 `package.json` `files` 排除 `__pycache__` / `*.pyc`；
+  - `npm test` 保留 21 条注册冒烟；新增 `npm run test:python` 与 `npm run test:all`
+    统一验证入口（21+27+30+10 条断言）；
+  - `README.md` 补 badges、对比层说明与自检命令。
+
 ## 0.3.1 — 2026-10-17
 - **修复 `test/smoke.mjs` 裸跑必挂**（Qoder 侧复核发现）：ROOT 默认 `'.'` 时
   `'file://' + './lib/skill.js'` 拼出 host 段为 `.` 的非法 file URL → `ERR_MODULE_NOT_FOUND`，

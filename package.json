@@ -1,8 +1,13 @@
 {
   "name": "dsh-invest-research",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Multi-agent equity & fund research skill bundle for DeepSeek Harness — two skills: stock-research (6-role A-share pipeline) and fund-research (7-role fund look-through pipeline with 10-section reports), source-cited data, multi-channel fetchers, and a shared pre-write PII gate.",
   "license": "MIT",
+  "author": "lobster-liu",
+  "homepage": "https://github.com/lobster-liu/dsh-invest-research#readme",
+  "bugs": {
+    "url": "https://github.com/lobster-liu/dsh-invest-research/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -16,13 +21,17 @@
     "cordis.patch.yml",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "!**/__pycache__/**",
+    "!**/*.pyc"
   ],
   "engines": {
     "node": "^22.19 || >=24"
   },
   "scripts": {
-    "test": "node test/smoke.mjs"
+    "test": "node test/smoke.mjs",
+    "test:python": "python assets/skills/stock-research/tools/test_gate.py && python assets/skills/fund-research/tools/test_fund_tools.py && python assets/skills/fund-research/tools/test_peer_tools.py",
+    "test:all": "npm run test && npm run test:python"
   },
   "keywords": [
     "dsh",
@@ -44,5 +53,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lobster-liu/dsh-invest-research.git"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

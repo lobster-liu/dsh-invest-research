@@ -1,7 +1,7 @@
 # dsh bundle layer: mount the invest-research skill plugin (equity + fund).
 #
 # Install:
-#   dsh plugin --profile <name> add github:<user>/dsh-invest-research
+#   dsh plugin --profile <name> add github:lobster-liu/dsh-invest-research
 # DSH activates only direct dependencies' bundle layers — one line is enough:
 # this plugin has zero runtime dependencies.
 - insert:

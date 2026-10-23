@@ -1,12 +1,15 @@
 # dsh-invest-research
 
+[![npm version](https://img.shields.io/npm/v/dsh-invest-research.svg?style=flat-square)](https://www.npmjs.com/package/dsh-invest-research)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+
 > Multi-agent equity & fund research pipeline **skill plugin** for [DeepSeek Harness (DSH)](https://harness.deepseek.com).
 > 同一包内提供**两个 skill**，共用脱敏门禁与环境约定：
 >
 > | skill | 用途 | 角色 |
 > |---|---|---|
 > | `stock-research` | 单只 A 股行情/估值/周期/政策分析 | 6 角色（协调员/数据员/政策员/估值周期员/风控员/审计员），双盲隔离 + 三轮审计 |
-> | `fund-research` | **基金穿透式研究**（主动/指数/ETF/联接/FOF/QDII/债基） | 7 角色（协调员 + 基金画像穿透/宏观政策/行业趋势/公司估值/绩效归因/反方审查），五阶段流程 |
+> | `fund-research` | **基金穿透式研究**（主动/指数/ETF/联接/FOF/QDII/债基）+ **可选同业对比层** | 7 角色 + 对比层 3 角色（peer-orchestrator/peer-builder/peer-red-team），五阶段 + 阶段 6 对比 |
 >
 > 最终都产出**每个数字带【来源|日期|口径|类型】、落盘前过 PII 脱敏**的研究报告。
 
@@ -15,8 +18,8 @@
 ## Install 安装
 
 ```bash
-# 从 GitHub(发布后)
-dsh plugin --profile <profile-name> add github:<your-user>/dsh-invest-research
+# 从 GitHub
+dsh plugin --profile <profile-name> add github:lobster-liu/dsh-invest-research
 
 # 或从本地目录 / zip 解包后
 dsh plugin --profile <profile-name> add path/to/dsh-invest-research
@@ -24,6 +27,8 @@ dsh plugin --profile <profile-name> add path/to/dsh-invest-research
 
 > **v0.3.0 起包名由 `dsh-stock-research` 改为 `dsh-invest-research`**（加入了基金研究能力）。
 > GitHub 旧地址会自动重定向；已安装旧版的用户请移除后按新名重装。
+> **v0.4.0 起 `fund-research` 新增可选同业对比层**（阶段 6）：同一主题下多只基金"谁更优"，
+> 由对比协调员亲自派发互相隔离的独立角色 agent 做跨基金对比 + 独立 red-team 质疑。
 
 重启 DSH → 新会话里说 **"分析 600048"**（stock-research）或 **"分析基金 025490"**、**"穿透这只基金的持仓"**（fund-research）即触发。
 
@@ -38,6 +43,9 @@ python assets/skills/fund-research/tools/fetch_fund.py --code 025490 --out /tmp/
 python assets/skills/fund-research/tools/test_fund_tools.py
 # 4) 脱敏门禁行为自检(27 场景,期望 exit 0)
 python assets/skills/stock-research/tools/test_gate.py
+# 5) 对比层工具离线自测(10 条断言,期望 exit 0)
+python assets/skills/fund-research/tools/test_peer_tools.py
+# 统一入口:npm test 跑 21 条注册冒烟;npm run test:all 跑全部(21+27+30+10)
 ```
 
 ## What's inside
@@ -49,10 +57,13 @@ python assets/skills/stock-research/tools/test_gate.py
 | `assets/skills/stock-research/tools/fetch_data.py` | 东财双通道行情/历史取数 + 分位/最大回撤衍生计算;**空数据退出码 1** |
 | `assets/skills/stock-research/tools/fetch_fundamentals.py` | **(v0.2.0)** 可选 akshare 财务基本面通道:ROE/每股净资产/负债率/现金流 + PE·PB 近一年真分位;未装 akshare 时退出码 1 不阻断主流程 |
 | `install_akshare.ps1` / `requirements.txt` | **(v0.2.0)** 沙箱内离线装 akshare(Node fetch 下 wheel + `--no-index --find-links`),绕开 pip 平台临时目录 `WinError 5` 与 schannel 两个坑 |
-| `assets/skills/fund-research/SKILL.md` | **(v0.3.0)** 基金流程总纲:五阶段、10 章报告、5 个结论标签、三种情景、跟踪清单、条件式行动 |
-| `assets/skills/fund-research/roles/*.md` ×7 | **(v0.3.0)** 协调员 + Agent1–Agent6 完整提示词,统一 7 项提交格式 |
+| `assets/skills/fund-research/SKILL.md` | **(v0.3.0 / v0.4.0)** 基金流程总纲:五阶段 + 阶段6 对比层、10 章报告、5 个结论标签、三种情景、跟踪清单、条件式行动、铁律 11(对比层必由独立 agent 派发) |
+| `assets/skills/fund-research/roles/*.md` ×10 | **(v0.3.0 / v0.4.0)** 协调员 + Agent1–Agent6 + 对比层 3 角色(`peer-orchestrator` / `peer-builder` / `peer-red-team`),统一提交格式 |
 | `assets/skills/fund-research/tools/fetch_fund.py` | **(v0.3.0)** 基金身份/净值/多期持仓/行业配置/债券持仓/规模份额/持有人/资产配置/经理/基准对比/重仓股快照;多通道降级,**空数据退出码 1** |
 | `assets/skills/fund-research/tools/test_fund_tools.py` | **(v0.3.0)** 30 条离线断言(内联 fixture + 网络桩,零网络) |
+| `assets/skills/fund-research/tools/peer_builder.py` | **(v0.4.0)** 同业筛选器:按「跟踪标的一致 + 被动属性 + 同份额类别 + 开放申购」筛同业,**只筛不评** |
+| `assets/skills/fund-research/tools/comparator.py` | **(v0.4.0)** 对比矩阵生成器:读 `peers.json` + 各基金 `report.md`/`fund.json`,对齐已冻结结论、暴露口径冲突,**不重算指标** |
+| `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.4.0)** 对比层 10 条离线断言(纯逻辑 + 工作区临时目录 fixture,零网络) |
 | `tools/sanitize_check.py` | 落盘前 PII 门禁:5 类泄漏规则 + 5 层公开信息白名单(财报科目/政策条款/金融术语/**基金公开披露**/否定声明);混合陷阱必拦 |
 | `tools/test_gate.py` | 门禁行为自检 27 场景(真泄漏必拦/公开条款必放/基金披露必放/陷阱必拦) |
 | `tools/run_pipeline.ps1` | Windows PowerShell 引导脚本(ASCII-only,PS 5.1 兼容) |
