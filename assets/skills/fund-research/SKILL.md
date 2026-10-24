@@ -5,7 +5,7 @@ description: 多智能体协同的基金穿透式研究流水线。7 角色（�
 
 # 基金穿透式研究 · 多智能体流水线（fund-research）
 
-> 本 skill 由插件 `dsh-stock-research` 提供，`roles/`、`tools/` 与本文件同包发布。
+> 本 skill 由插件 `dsh-invest-research` 提供，`roles/`、`tools/` 与本文件同包发布。
 > 姊妹 skill `stock-research`（单只 A 股行情流水线）在同一插件内，工具目录 `../stock-research/tools/` 共用。
 
 ## 何时使用

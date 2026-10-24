@@ -4,12 +4,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 > Multi-agent equity & fund research pipeline **skill plugin** for [DeepSeek Harness (DSH)](https://harness.deepseek.com).
-> 同一包内提供**两个 skill**，共用脱敏门禁与环境约定：
+> 同一包内提供**10 个 skill**，共用脱敏门禁与环境约定：
 >
-> | skill | 用途 | 角色 |
+> | 类别 | skill | 用途 |
 > |---|---|---|
-> | `stock-research` | 单只 A 股行情/估值/周期/政策分析 | 6 角色（协调员/数据员/政策员/估值周期员/风控员/审计员），双盲隔离 + 三轮审计 |
-> | `fund-research` | **基金穿透式研究**（主动/指数/ETF/联接/FOF/QDII/债基）+ **可选同业对比层** | 7 角色 + 对比层 3 角色（peer-orchestrator/peer-builder/peer-red-team），五阶段 + 阶段 6 对比 |
+> | 个股 | `stock-research` | 单只 A 股行情/估值/周期/政策分析 | 6 角色（协调员/数据员/政策员/估值周期员/风控员/审计员），双盲隔离 + 三轮审计 |
+> | 基金重研究 | `fund-research` | **基金穿透式研究**（主动/指数/ETF/联接/FOF/QDII/债基）+ **可选同业对比层** | 7 角色 + 对比层 3 角色（peer-orchestrator/peer-builder/peer-red-team），五阶段 + 阶段 6 对比 |
+> | 基金轻工作流 | `pick-funds`（入口）· `fund-screen` · `fund-profile` · `fund-watch` · `holdings-style` · `manager-profile` · `report-render` · `xlsx-author` | 筛选 / 单基金画像 / 经理画像 / 持仓风格 / 持续跟踪 / PDF·DOCX·XLSX 交付 | 单 agent 按技能逐步执行，产出带 `[披露]/[测算]/…` 溯源标签的交付物 |
 >
 > 最终都产出**每个数字带【来源|日期|口径|类型】、落盘前过 PII 脱敏**的研究报告。
 
@@ -30,7 +31,7 @@ dsh plugin --profile <profile-name> add path/to/dsh-invest-research
 > **v0.4.0 起 `fund-research` 新增可选同业对比层**（阶段 6）：同一主题下多只基金"谁更优"，
 > 由对比协调员亲自派发互相隔离的独立角色 agent 做跨基金对比 + 独立 red-team 质疑。
 
-重启 DSH → 新会话里说 **"分析 600048"**（stock-research）或 **"分析基金 025490"**、**"穿透这只基金的持仓"**（fund-research）即触发。
+重启 DSH → 新会话里说 **"分析 600048"**（stock-research）或 **"分析基金 025490"**、**"穿透这只基金的持仓"**（fund-research）即触发；说 **"筛选基金"**、**"这只基金怎么样"**、**"基金经理画像"**、**"出一份 PDF 报告"** 则命中 pick-funds 套件。
 
 ## Quick check 安装自检
 
@@ -67,6 +68,50 @@ python assets/skills/fund-research/tools/test_peer_tools.py
 | `tools/sanitize_check.py` | 落盘前 PII 门禁:5 类泄漏规则 + 5 层公开信息白名单(财报科目/政策条款/金融术语/**基金公开披露**/否定声明);混合陷阱必拦 |
 | `tools/test_gate.py` | 门禁行为自检 27 场景(真泄漏必拦/公开条款必放/基金披露必放/陷阱必拦) |
 | `tools/run_pipeline.ps1` | Windows PowerShell 引导脚本(ASCII-only,PS 5.1 兼容) |
+
+## pick-funds 分析师套件（v0.5.0 新增）
+
+移植自 ZCode 官方插件 **pick-funds v0.1.1**，把原「1 agent + 7 skills」改为纯 skill 承载，
+入口技能 `pick-funds` 承载工作模式路由、数据源优先级与共享护栏。
+
+| 技能 | 触发场景 |
+|---|---|
+| `pick-funds` | 基金研究类任务入口；共享护栏 + **DSH 数据源映射** |
+| `fund-screen` | 筛选基金 / 找基金 / 近一年收益前 10% |
+| `fund-profile` | 基金画像 / XX 基金怎么样 |
+| `fund-watch` | 基金跟踪 / 持仓基金有没有问题 / 规模异动 |
+| `holdings-style` | 持仓分析 / 风格漂移 / 两只基金重合度 |
+| `manager-profile` | 基金经理 / 经理画像 / 这个经理靠谱吗 |
+| `report-render` | 出一份 PDF / 导出报告 / 存成 docx |
+| `xlsx-author` | 表格类交付落成 .xlsx |
+
+### 与 `fund-research` 的分工
+
+要「筛 / 画像 / 盯 / 比 / 出报告」用本套件（单 agent 工作流）；要「穿透底层 + 多 agent
+交叉验证 + 固定 10 章」用 `fund-research`。两者都只读公开数据、不出具投资建议。
+
+### DSH 数据源映射
+
+本套件按 DSH 原生方式接线：**无 MCP server 依赖**，直接走本插件自带取数脚本 + Web 检索兜底。
+
+| 需要的数据 | DSH 取法 |
+|---|---|
+| 基金档案/净值/持仓/规模/份额/持有人/经理/费率/基准/重仓股 | 本插件 `fetch_fund.py`（`数据` / `持仓` / `净值序列` 等字段） |
+| 指数/个股行情、板块、财务基本面 | 本插件 `fetch_data.py` + `web_fetch` |
+| 基金经理变更公告、基金公司事件 | `web_search` + `web_fetch`（基金公司公告 / 巨潮 / 交易所披露页） |
+| 定性背景（经理访谈、基金公司事件） | `web_search` + `web_fetch`（媒体档标 `[媒体]`） |
+| 基金筛选（全市场按条件过滤） | **无等价脚本** → `web_search` + `web_fetch`（天天基金等筛选页），须在覆盖度写明引擎口径 |
+
+没有对应能力时记 `源不可用` 并写入覆盖度区块，**不得静默跳到通用搜索兜底**。
+`fetch_fund.py` 退出码 `1` 表示基金身份与净值都取不到，此时停止并如实报告，不带空数据继续。
+
+### 依赖边界
+
+- `report-render` 另需 `reportlab / matplotlib / pypdf / pypdfium2 / pillow / fonttools`
+  （见 `assets/skills/report-render/scripts/requirements.txt`）与系统 CJK 字体；
+- `xlsx-author` 需 `openpyxl`，公式重算校验走 headless LibreOffice（缺失时用技能定义的强制
+  替代检查并如实标注，不假装通过）；
+- 两者脚本均为纯 Python，随技能原样携带，无平台耦合。
 
 ## Requirements
 - DSH ≥ 0.2.0-rc(skill 注册走 Host `skills` 服务;**无该服务时插件加载为 no-op,不会报错**)

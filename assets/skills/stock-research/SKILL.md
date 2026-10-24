@@ -5,7 +5,7 @@ description: 多智能体协同的 A 股行情分析流水线。6 角色（协�
 
 # A 股行情分析 · 多智能体流水线（stock-research）
 
-> 本 skill 由插件 `dsh-stock-research` 提供，`roles/`、`tools/` 与本文件同包发布。
+> 本 skill 由插件 `dsh-invest-research` 提供，`roles/`、`tools/` 与本文件同包发布。
 
 ## 何时使用
 - 用户要求分析某只 A 股或某个板块的行情、估值、周期、政策

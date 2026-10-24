@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.0 — 2026-10-24
+- **新增 pick-funds 分析师套件（8 个技能，移植自 ZCode 官方插件 pick-funds v0.1.1，DSH 原生版）**：
+  覆盖公募基金 / ETF / LOF 的筛选、单基金画像、经理画像、持仓与风格分析、候选池持续跟踪，
+  以及 PDF / DOCX / XLSX 交付。
+  - 技能：`pick-funds`（入口）· `fund-screen` · `fund-profile` · `fund-watch` ·
+    `holdings-style` · `manager-profile` · `report-render` · `xlsx-author`
+  - 入口技能新增「与 `fund-research` 的分工」路由节：轻量单 agent 工作流 → 本套件；
+    穿透式 + 多智能体 + 反方审查 + 固定 10 章 → `fund-research`。
+- **全面改为 DSH 原生版**：去掉 Hermes 接线，直接按 DSH 技能规范编写（`name` + `description` + `whenToUse` + `tags` 根级字段）；
+  入口技能新增「基金数据纪律」与「共享护栏」细则；`fund-screen` 新增 `wind-fund.search_funds` 筛选引擎；
+  `report-render` 详细 Step 4 视觉验收闸门（canary + 逐页复核）+ Step 1N 数值版式检查降级；
+  `xlsx-author` 详细 LibreOffice exit 3 处理 + 静态 lint 降级路径。
+- **新增「DSH 数据源映射」层**：原套件按 Hermes 的 `hexin-*` / `wind-*` / `finance-search`
+  MCP server 接线，DSH 版直接映射到本插件自带取数脚本（`fetch_fund.py` /
+  `fetch_data.py`）+ `web_fetch` / `web_search`，并保留 `源不可用` 纪律与退出码 `1`
+  的「禁止带空数据继续」。
+- **`lib/skill.js` 注册数 2 → 10**；`test/smoke.mjs` 断言同步扩到 10 个技能（含名单、
+  rank、provider、逐 provider 不串台）。
+- **frontmatter 全面改为 DSH 规范**：8 个技能采用 `name` + `description` + `whenToUse` + `version` + `author` + `tags`（根级）；
+  去除 `metadata.hermes`；author 追加 DSH 并入说明；非入口技能的共享护栏引用块注入 DSH 取数指引。
+- **依赖边界如实标注**：`report-render` 另需 `reportlab / matplotlib / pypdf / pypdfium2 /
+  pillow / fonttools` 与系统 CJK 字体；`xlsx-author` 需 `openpyxl`，公式重算校验走 headless
+  LibreOffice（缺失时走技能定义的强制替代检查并如实标注，不假装通过）。
+
 ## 0.4.0 — 2026-10-23
 - **新增 `fund-research` 对比层（阶段 6，跨基金同业对比）**：给定锚点 + 候选同业，先由
   `peer_builder.py` 按「跟踪标的一致 + 被动属性 + 同份额类别 + 开放申购」筛出合法同业
