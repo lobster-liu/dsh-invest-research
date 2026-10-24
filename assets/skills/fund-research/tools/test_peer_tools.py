@@ -3,8 +3,13 @@
 """
 test_peer_tools.py —— peer_builder.py / comparator.py 离线自测（零网络）。
 
-覆盖 peer_builder 的 4 个纯逻辑函数（跟踪标的解析 / 被动判定 / 份额类别 / 结构判定）
+覆盖 peer_builder 的 7 个纯逻辑函数（跟踪标的解析 / 被动判定 / 份额类别 /
+类型后缀剥离 / 主体名剥离 / 代码归一 / 结构判定）
 与 comparator 的 2 个纯函数（报告标签提取 / 对比矩阵构建）。
+
+回归重点（上游 v0.4.0 缺陷，2026-10 修复）：
+  · '某ETF' 曾被 detect_share_class 判成 'F' 份额 → 现必须返回 ''
+  · '11839' 曾原样查询导致"未找到" → 现必须归一为 '011839'
 
 fixture 用工作区内临时目录（不用 %TEMP%，DSH 沙箱拒绝平台临时目录 → PermissionError 13）。
 
@@ -83,6 +88,50 @@ def test_detect_share_class():
     assert pb.detect_share_class('某指数E', '000003') == 'E'
     assert pb.detect_share_class('某指数I', '000004') == 'I'
     assert pb.detect_share_class('某指数（无后缀）', '000005') == ''
+
+
+def test_detect_share_class_type_tail_not_share_class():
+    """回归：类型/联接缩写结尾的末位字母绝不能当份额类别。"""
+    assert pb.detect_share_class('某ETF', '000010') == ''
+    assert pb.detect_share_class('某LOF', '000011') == ''
+    assert pb.detect_share_class('某QDII', '000012') == ''
+    assert pb.detect_share_class('某行业指数', '000013') == ''
+    # 类型缩写 + 真份额字母 → 仍能识别
+    assert pb.detect_share_class('某ETF联接A', '000014') == 'A'
+    assert pb.detect_share_class('天弘中证人工智能主题ETF发起式联接C', '000015') == 'C'
+    # 币种括号不干扰
+    assert pb.detect_share_class('某指数A（人民币）', '000016') == 'A'
+    # 真空份额 F 仍识别
+    assert pb.detect_share_class('某指数F', '000017') == 'F'
+
+
+def test_strip_share_class():
+    """同基金不同份额剥完后主体名必须相等；ETF 等类型缩写不得被剥掉。"""
+    a = pb.strip_share_class('天弘中证人工智能主题ETF发起式联接A')
+    c = pb.strip_share_class('天弘中证人工智能主题ETF发起式联接C')
+    assert a == c == '天弘中证人工智能主题ETF发起式联接'
+    assert pb.strip_share_class('某ETF') == '某ETF'      # 类型缩写不剥
+    assert pb.strip_share_class('某指数A（人民币）') == '某指数'
+    assert pb.strip_share_class('') == ''
+    # 不同基金主体名必须不同（防误剔）
+    assert pb.strip_share_class('华夏沪深300指数A') != pb.strip_share_class('易方达沪深300指数A')
+
+
+def test_normalize_code():
+    """回归：短码必须补前导零，否则查询直接「未找到」。"""
+    assert pb.normalize_code('11839') == '011839'
+    assert pb.normalize_code(' 11839 ') == '011839'
+    assert pb.normalize_code('011839') == '011839'
+    assert pb.normalize_code('') == ''
+    assert pb.normalize_code(None) == ''
+
+
+def test_normalize_codes():
+    """逗号串归一：补零 + 去空 + 保序去重（幂等，防 PowerShell 剥零）。"""
+    assert pb.normalize_codes('11839,023461') == ['011839', '023461']
+    assert pb.normalize_codes(' 11839 , 23461 ') == ['011839', '023461']
+    assert pb.normalize_codes('11839,,11839') == ['011839']
+    assert pb.normalize_codes('') == []
 
 
 def test_detect_structure():

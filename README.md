@@ -44,9 +44,9 @@ python assets/skills/fund-research/tools/fetch_fund.py --code 025490 --out /tmp/
 python assets/skills/fund-research/tools/test_fund_tools.py
 # 4) 脱敏门禁行为自检(27 场景,期望 exit 0)
 python assets/skills/stock-research/tools/test_gate.py
-# 5) 对比层工具离线自测(10 条断言,期望 exit 0)
+# 5) 对比层工具离线自测(14 条断言,期望 exit 0;含 ETF/联接份额与短码补零回归)
 python assets/skills/fund-research/tools/test_peer_tools.py
-# 统一入口:npm test 跑 21 条注册冒烟;npm run test:all 跑全部(21+27+30+10)
+# 统一入口:npm test 跑 21 条注册冒烟;npm run test:all 跑全部(21+27+30+14)
 ```
 
 ## What's inside
@@ -62,9 +62,9 @@ python assets/skills/fund-research/tools/test_peer_tools.py
 | `assets/skills/fund-research/roles/*.md` ×10 | **(v0.3.0 / v0.4.0)** 协调员 + Agent1–Agent6 + 对比层 3 角色(`peer-orchestrator` / `peer-builder` / `peer-red-team`),统一提交格式 |
 | `assets/skills/fund-research/tools/fetch_fund.py` | **(v0.3.0)** 基金身份/净值/多期持仓/行业配置/债券持仓/规模份额/持有人/资产配置/经理/基准对比/重仓股快照;多通道降级,**空数据退出码 1** |
 | `assets/skills/fund-research/tools/test_fund_tools.py` | **(v0.3.0)** 30 条离线断言(内联 fixture + 网络桩,零网络) |
-| `assets/skills/fund-research/tools/peer_builder.py` | **(v0.4.0)** 同业筛选器:按「跟踪标的一致 + 被动属性 + 同份额类别 + 开放申购」筛同业,**只筛不评** |
+| `assets/skills/fund-research/tools/peer_builder.py` | **(v0.5.1)** 同业筛选器:**脚本执行 3 条**(跟踪标的严格相等 / 仅被动型 / 非同一基金不同份额)+ **标记 1 条**(结构差异);**交易状态与份额类别一致性不执行**,写入 `agent_review_required[]` 交 Agent-P1 人工复核,**只筛不评** |
 | `assets/skills/fund-research/tools/comparator.py` | **(v0.4.0)** 对比矩阵生成器:读 `peers.json` + 各基金 `report.md`/`fund.json`,对齐已冻结结论、暴露口径冲突,**不重算指标** |
-| `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.4.0)** 对比层 10 条离线断言(纯逻辑 + 工作区临时目录 fixture,零网络) |
+| `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.5.1)** 对比层 14 条离线断言(含 `某ETF` 不得判成 F 份额、`11839→011839` 补零两项回归;纯逻辑 + 工作区临时目录 fixture,零网络) |
 | `tools/sanitize_check.py` | 落盘前 PII 门禁:5 类泄漏规则 + 5 层公开信息白名单(财报科目/政策条款/金融术语/**基金公开披露**/否定声明);混合陷阱必拦 |
 | `tools/test_gate.py` | 门禁行为自检 27 场景(真泄漏必拦/公开条款必放/基金披露必放/陷阱必拦) |
 | `tools/run_pipeline.ps1` | Windows PowerShell 引导脚本(ASCII-only,PS 5.1 兼容) |

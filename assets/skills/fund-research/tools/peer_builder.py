@@ -1,23 +1,35 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-peer_builder.py —— fund-research 同业构建器（技能更新新增工具）
+peer_builder.py —— fund-research 同业构建器（阶段 6 对比层第一步）
 
 职责：给定锚点基金，自动或按名单构建"合法同业集合"。
 核心判据：**跟踪标的严格相等**。名字 / 主题词 / 行业标签都不作数。
 
-铁律（违反即剔除）：
-  1. 同一基金的不同份额（A/C/E/I/联接）绝不构成同业 —— 直接剔除
-  2. 跟踪标的不严格相等 —— 直接剔除
-  3. 主动管理型 —— 剔除（不构成"同标的指数"同业）
-  4. 交易状态非开放申购 —— 剔除
-  5. 份额类别不一致 —— 剔除（A 只对 A，C 只对 C）
-  6. 结构差异（联接 vs 直投）—— 不剔除，但标记为"不可比较维度"
+────────────────────────────────────────────────────────────────────────
+脚本实际执行的判定（违反即剔除，共 3 条）
+  A. 跟踪标的不严格相等 —— 直接剔除
+  B. 主动管理型（非指数 / ETF / 被动）—— 剔除
+  C. 与锚点属同一基金的不同份额 —— 剔除（按 strip_share_class 后的主体名比对）
 
-用法（Windows，必须走 pwsh 调 python）：
+不剔除、只打标记（1 条）
+  D. 结构差异（联接 vs 直投）—— 写入 structure / comparability，标为"不可比较维度"
+
+脚本 **不执行**、必须由 Agent-P1 人工复核（2 条，见 roles/peer-builder.md）
+  E. 交易状态（封闭期 / 暂停申购 / 暂停大额申购）—— 本脚本不读交易状态字段
+  F. 份额类别一致性（A 只对 A，C 只对 C）—— 本脚本只给 share_class 字段，不做分组剔除
+────────────────────────────────────────────────────────────────────────
+
+⚠️ 已知局限
+  · share_class 由简称末位字母推断，是**启发式**而非披露字段；
+    类型/联接缩写（ETF / LOF / FOF / QDII / 联接）结尾已排除，不会被误判成份额类别，
+    但 "某ETF" 这类基础盘仍须人工核对（见 detect_share_class / strip_share_class）。
+  · 结构化字段 comparability 只表达"脚本能证明的前提"，不表达"可对比谁更优"。
+
+用法（Windows，必须走 pwsh 调 python；--codes 一律加引号，脚本内 zfill(6) 兜底）：
   & $PY peer_builder.py --anchor 012733 --keyword 人工智能 --out peers.json
-  & $PY peer_builder.py --anchor 012733 --codes 011839,023461 --out peers.json
-  & $PY peer_builder.py --anchor 012733 --codes 011839,023461 --track 中证人工智能主题指数 --out peers.json
+  & $PY peer_builder.py --anchor 012733 --codes '011839,023461' --out peers.json
+  & $PY peer_builder.py --anchor 012733 --codes '011839,023461' --track 中证人工智能主题指数 --out peers.json
 """
 
 import argparse
@@ -38,6 +50,21 @@ UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
 SEARCH_URL = 'http://fund.eastmoney.com/js/fundcode_search.js'
 # 搜索列表字段：代码 / 拼音 / 简称 / 类型 / 全称拼音
 SEARCH_KEYS = ('fund_code', 'pinyin_abbr', 'fund_name', 'fund_type', 'pinyin_full')
+
+# 类型 / 联接 / 结构缩写结尾：这些结尾的末位字母**不是**份额类别
+# 修复历史缺陷：'某ETF' 曾因末尾是 F 被判成 F 份额。
+TYPE_TAIL_WORDS = ('发起式联接', 'ETF联接', 'ETF-FOF', '联接', 'LOF', 'FOF',
+                   'QDII', 'ETF', '指数增强', '指数', '增强', '基金')
+
+# 份额类别字母（不含 B：少数分级 B 已退市，遇 B 走人工复核）
+SHARE_CLASS_LETTERS = ('A', 'C', 'D', 'E', 'F', 'I', 'O', 'Y')
+
+# 币种 / 份额修饰括号，剥掉后才判断末位字母
+CURRENCY_PAREN = re.compile(
+    r'[（(]\s*(?:人民币|美元|美元现汇|美元现钞|港币|欧元|美元份额|人民币份额)\s*[）)]\s*$')
+
+# 末尾任意括号补充说明（如在管、仅限机构等），仅用于主体名比对
+TRAILING_PAREN = re.compile(r'[（(][^（）()]*[）)]\s*$')
 
 
 def http_get(url, timeout=30):
@@ -95,14 +122,49 @@ def is_passive(fund_type):
     return ('指数' in fund_type) or ('ETF' in fund_type) or ('被动' in fund_type)
 
 
-def detect_share_class(name, code):
-    """份额类别：以简称结尾的 A/C/E/I/D/Y/F 判定。联接 / 发起式 单独标记。"""
-    suffix = ''
-    for s in ('A', 'C', 'E', 'I', 'D', 'Y', 'F'):
-        if name.endswith(s):
-            suffix = s
-            break
-    return suffix
+def _ends_with_type_tail(name):
+    """简称是否以类型/联接/结构缩写结尾（此时末位字母不构成份额类别）。"""
+    return any(name.endswith(t) for t in TYPE_TAIL_WORDS)
+
+
+def strip_share_class(name):
+    """剥掉简称末尾的份额字母与币种括号，返回"基金主体名"，用于识别同基金不同份额。
+
+    例：'天弘中证人工智能主题ETF发起式联接A' → '天弘中证人工智能主题ETF发起式联接'
+        '天弘中证人工智能主题ETF发起式联接C' → '天弘中证人工智能主题ETF发起式联接'  （相等 → 同一基金）
+        '某ETF'                              → '某ETF'（ETF 是类型缩写，不剥）
+        '某指数A（人民币）'                   → '某指数'
+    """
+    s = (name or '').strip()
+    if not s:
+        return ''
+    s = CURRENCY_PAREN.sub('', s).strip()
+    if _ends_with_type_tail(s):
+        return s
+    m = re.search(r'([A-Z])$', s)
+    if m and m.group(1) in SHARE_CLASS_LETTERS:
+        return s[:-1].strip()
+    return s
+
+
+def detect_share_class(name, code=''):
+    """份额类别：以简称结尾的 A/C/D/E/F/I/O/Y 判定；识别不出返回 ''。
+
+    修复（上游 v0.4.0 缺陷）：先剥币种括号、再排除 ETF/LOF/FOF/QDII/联接/
+    指数/增强/基金 等类型缩写结尾，最后才匹配末位字母。
+    因此 '某ETF' 不再被判成 'F' 份额。
+    """
+    s = (name or '').strip()
+    if not s:
+        return ''
+    s = CURRENCY_PAREN.sub('', s).strip()
+    # 类型/联接缩写结尾 → 末位字母属于类型词，不是份额类别
+    if _ends_with_type_tail(s):
+        return ''
+    m = re.search(r'([A-Z])$', s)
+    if m and m.group(1) in SHARE_CLASS_LETTERS:
+        return m.group(1)
+    return ''
 
 
 def detect_structure(name):
@@ -116,8 +178,36 @@ def detect_structure(name):
     return '指数'
 
 
+def normalize_code(raw):
+    """基金代码归一：去空白、补前导零到 6 位。
+
+    修复（上游 v0.4.0 缺陷）：用户/OCR 传入 '11839' 时曾原样查询 → '未找到'。
+    现统一 zfill(6) → '011839'。非纯数字代码（如场外特殊代码）原样返回。
+    """
+    s = (raw or '').strip()
+    if not s:
+        return ''
+    if s.isdigit() and len(s) < 6:
+        return s.zfill(6)
+    return s
+
+
+def normalize_codes(raw):
+    """逗号分隔的候选代码串 → 归一后的列表（自动 zfill(6)、去空项、保序去重）。"""
+    out = []
+    for c in (raw or '').split(','):
+        c = normalize_code(c)
+        if c and c not in out:
+            out.append(c)
+    return out
+
+
 def build(args):
     now = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+    anchor_code = normalize_code(args.anchor)
+    padded = []
+    if anchor_code != (args.anchor or '').strip():
+        padded.append(f'{args.anchor}→{anchor_code}')
 
     # 第一步：锚点跟踪标的
     anchor_name = ''
@@ -127,20 +217,24 @@ def build(args):
     else:
         # 从基金列表找锚点名
         fund_list = load_fund_list()
-        anchor = next((f for f in fund_list if f['fund_code'] == args.anchor), None)
+        anchor = next((f for f in fund_list if f['fund_code'] == anchor_code), None)
         if anchor:
             anchor_name = anchor['fund_name']
-        anchor_track = fetch_tracking_target(args.anchor)
+        anchor_track = fetch_tracking_target(anchor_code)
         if not anchor_track:
             print('错误: 锚点跟踪标的无法确认，无法判定同业。', file=sys.stderr)
             return 1
-        print(f'[锚点] {args.anchor} {anchor_name} 跟踪标的: {anchor_track}')
+        print(f'[锚点] {anchor_code} {anchor_name} 跟踪标的: {anchor_track}')
 
     # 第二步：候选集合（名称/类型一律从全量列表查，不依赖用户输入）
     fund_list = load_fund_list()
     by_code = {f['fund_code']: f for f in fund_list}
     if args.codes:
-        codes = [c.strip() for c in args.codes.split(',') if c.strip()]
+        codes = normalize_codes(args.codes)
+        for raw in (args.codes or '').split(','):
+            nc = normalize_code(raw)
+            if raw.strip() and nc != raw.strip():
+                padded.append(f'{raw.strip()}→{nc}')
         candidates = []
         for c in codes:
             f = by_code.get(c)
@@ -160,47 +254,61 @@ def build(args):
             return 1
         print(f'[候选] {source} → {len(candidates)} 只')
 
+    if padded:
+        print(f'[代码归一] 已补前导零: {", ".join(padded)}')
+
     # 第三步：逐只核对
     peers = []
     rejected = []
-    seen_stem = {}  # 去重：去掉份额后缀后的"母基金名"
-    anchor_stem = re.sub(r'[ACEIDYF]$', '', anchor_name)
+    anchor_stem = strip_share_class(anchor_name)
+    anchor_struct = detect_structure(anchor_name) if anchor_name else ''
+    anchor_share = detect_share_class(anchor_name, anchor_code) if anchor_name else ''
 
     for cand in candidates:
         code = cand['fund_code']
-        if code == args.anchor:
+        if code == anchor_code:
             continue
         name = cand.get('fund_name', '')
         ftype = cand.get('fund_type', '')
         # 份额与结构
         share = detect_share_class(name, code)
         struct = detect_structure(name)
-        stem = re.sub(r'[ACEIDYF]$', '', name)
+        stem = strip_share_class(name)
 
-        # 铁律 3：主动型剔除
+        # 判定 B：主动型剔除
         if not is_passive(ftype):
             rejected.append({'code': code, 'name': name, 'type': ftype,
                              'reason': f'非被动型({ftype})，不构成同标的同业'})
             continue
-        # 铁律 1：同基金不同份额剔除
-        if stem and stem == anchor_stem and name != anchor_name:
+        # 判定 C：同基金不同份额剔除
+        if stem and anchor_stem and stem == anchor_stem and name != anchor_name:
             rejected.append({'code': code, 'name': name, 'type': ftype,
-                             'reason': f'与锚点同基金不同份额（{stem}），铁律禁止混用'})
+                             'reason': f'与锚点同基金不同份额（主体名"{stem}"相同），铁律禁止混用'})
             continue
-        # 铁律 2：跟踪标的严格相等
+        # 判定 A：跟踪标的严格相等
         cand_track = ''
         try:
             cand_track = fetch_tracking_target(code)
-        except Exception as e:
+        except Exception:
             cand_track = ''
         if not cand_track:
             rejected.append({'code': code, 'name': name, 'type': ftype,
-                             'reason': f'跟踪标的取不到，无法判定'})
+                             'reason': '跟踪标的取不到，无法判定'})
             continue
         if cand_track != anchor_track:
             rejected.append({'code': code, 'name': name, 'type': ftype,
                              'reason': f'跟踪标的不同: "{cand_track}" ≠ "{anchor_track}"'})
             continue
+
+        # 判定 D：结构差异只标记不剔除
+        if anchor_struct and struct != anchor_struct:
+            struct_verdict = f'结构不同（锚点={anchor_struct} / 候选={struct}）：不可比较维度，保留但须标注'
+        else:
+            struct_verdict = f'结构一致（{struct}）'
+        share_verdict = ('锚点份额类别未能从简称识别，须人工核对'
+                         if not anchor_share
+                         else ('份额类别一致' if share == anchor_share
+                               else f'份额类别不一致（锚点={anchor_share} / 候选={share}）：须 Agent-P1 复核'))
 
         peers.append({
             'code': code,
@@ -210,53 +318,81 @@ def build(args):
             'share_class': share,
             'structure': struct,
             'same_stem': stem,
+            'comparability': {
+                'tracking_target': 'same',
+                'structure': struct_verdict,
+                'share_class': share_verdict,
+                'verdict': ('comparable_with_caveat'
+                            if (anchor_struct and struct != anchor_struct) else 'comparable'),
+            },
         })
 
     # 第四步：输出
     anchor_info = {
-        'code': args.anchor,
+        'code': anchor_code,
         'name': anchor_name or '(由 fund.json 提供)',
         'tracking_target': anchor_track,
+        'share_class': anchor_share,
+        'structure': anchor_struct,
+        'share_stem': anchor_stem,
     }
     result = {
         'anchor': anchor_info,
         'anchor_tracking_target': anchor_track,
         'build_time': now,
         'source': source,
-        'criteria': [
-            'tracking_target_exact_match（跟踪标的严格相等）',
-            'share_class_not_same_fund（同基金不同份额剔除）',
-            'passive_type_only（仅被动型）',
-            'structure_flag（联接/直投差异标记为不可比较维度，不剔除）',
+        'criteria_executed': [
+            'tracking_target_exact_match（跟踪标的严格相等）—— 脚本执行',
+            'passive_type_only（仅被动型）—— 脚本执行',
+            'share_not_same_fund（同基金不同份额按主体名剔除）—— 脚本执行',
+            'structure_flag（联接/直投差异标记，不剔除）—— 脚本执行',
         ],
+        'agent_review_required': [
+            'trading_status（封闭期/暂停申购/暂停大额申购）—— 脚本不读交易状态，必须 Agent-P1 人工复核',
+            'share_class_consistency（A 只对 A，C 只对 C）—— 脚本只输出 share_class 字段，不做分组剔除，必须 Agent-P1 复核',
+        ],
+        'comparability': {
+            'comparable': [p['code'] for p in peers if p['comparability']['verdict'] == 'comparable'],
+            'comparable_with_caveat':
+                [p['code'] for p in peers if p['comparability']['verdict'] == 'comparable_with_caveat'],
+            'undeterminable': [r['code'] for r in rejected],
+            'note': ('本字段只表达"脚本能证明的前提"。variance 维度（规模/费率/经理任期/'
+                     '跟踪误差）不在此判定，由 fetch_fund.py 逐只补齐后交对比层角色。'),
+        },
         'peers': peers,
         'rejected': rejected,
         'peer_count': len(peers),
         'rejected_count': len(rejected),
-        'gaps': ['交易状态/规模/经理任期/费率需由 fetch_fund.py 逐只补齐'],
+        'gaps': [
+            '交易状态/规模/经理任期/费率/跟踪误差需由 fetch_fund.py 逐只补齐',
+            '交易状态与份额类别分组未被本脚本校验，属 Agent-P1 人工复核项',
+        ],
     }
 
     with open(args.out, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
-    print(f'\n[结果] 锚点: {args.anchor} 跟踪标的: {anchor_track}')
+    print(f'\n[结果] 锚点: {anchor_code} 跟踪标的: {anchor_track}')
     print(f'  合法同业: {len(peers)} 只')
     for p in peers:
-        print(f'    {p["code"]} {p["name"]} [{p["share_class"]}/{p["structure"]}]')
+        print(f'    {p["code"]} {p["name"]} [{p["share_class"]}/{p["structure"]}]'
+              f' {p["comparability"]["verdict"]}')
     print(f'  剔除: {len(rejected)} 只')
     for r in rejected[:10]:
         print(f'    {r["code"]} {r["name"]} → {r["reason"]}')
     if len(rejected) > 10:
         print(f'    ... 还有 {len(rejected)-10} 只')
+    print('  ⚠️ 待 Agent-P1 人工复核: 交易状态 / 份额类别一致性')
     print(f'  已写入: {args.out}')
     return 0
 
 
 def main():
     ap = argparse.ArgumentParser(description='fund-research 同业构建器')
-    ap.add_argument('--anchor', required=True, help='锚点基金代码，如 012733')
+    ap.add_argument('--anchor', required=True, help='锚点基金代码，如 012733（不足 6 位自动补零）')
     ap.add_argument('--out', required=True, help='输出 peers.json 路径')
-    ap.add_argument('--codes', default='', help='逗号分隔的候选同业代码；给此则不用 keyword')
+    ap.add_argument('--codes', default='',
+                    help='逗号分隔的候选同业代码，必须加引号；给此则不用 keyword')
     ap.add_argument('--keyword', default='', help='名字关键词，自动搜索候选（如 "人工智能"）')
     ap.add_argument('--track', default='', help='可选，直接指定锚点跟踪标的，跳过锚点抓取')
     args = ap.parse_args()
