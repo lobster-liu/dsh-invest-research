@@ -39,6 +39,29 @@
     对比层铁律中的 `1.38%`、`2.24%`、`43.51亿 vs 120.51亿`、`3.97%`、`≈54%` 全部标注
     **「历史案例 / 示例数据，非通用统计，须按本次实测重算」**。
 
+## 0.5.4 — 2026-10-25
+**上游复核第三轮修复（4 项 P3）+ 版本解析加固。**
+
+1. **`fetch_fund.py` `_resolve_version()` 回落字面量仍为 `'0.5.2'`**（与包版本脱节）→ 提取为
+   `_VERSION_FALLBACK`，改为当前版本 `0.5.4`；`package.json` 版本变更时同步。
+2. **`_resolve_version()` 向上找 6 级 package.json，范围偏宽**（可能命中安装路径之上的无关项目）
+   → 改为**只认 `name == 'dsh-invest-research'` 的清单**，name 不匹配一律跳过；新增 2 条测试
+   （忽略无关清单 / 采用本插件清单）。
+3. **`--codes` 里"列表外代码"被当"非被动型"误拒**（真实缺陷）：注释写"靠抓取跟踪标的判定"，
+   但循环里先 `is_passive('')`，空类型直接判非被动型并 `continue`，**不会再去抓跟踪标的**
+   ——东财列表未收录的新基金/特殊代码即使有效也会被误拒。→ 新增 `fetch_fund_identity()`
+   抓基金页取简称/类型；**类型仍未知时跳过判据 B、交判据 A（跟踪标的严格相等）兜底**，
+   并记入 `type_unknown_codes[]` 与 `agent_review_required`（`type_unverified`），不再误拒。
+4. **`--max-candidates=0` 会把候选全部截断**（未校验下限）→ `build()` 入口校验 `>= 1`，
+   否则报错退出；help 文本同步注明。
+
+### 测试
+- `test_fund_tools.py` **30 → 33 条**：新增 `VERSION 对齐当前版本`、`_resolve_version 忽略 name
+  不匹配的无关 package.json`、`_resolve_version 采用本插件 package.json`。
+- `test_peer_tools.py` **21 → 23 条**：新增 `test_build_out_of_list_code_not_rejected_as_nonpassive`
+  （列表外代码不被误拒 + 记 `type_unknown_codes`）、`test_build_max_candidates_zero_errors`。
+- 全量：`npm test` 21/21 · `test_gate` 27/27 · `test_fund_tools` 33/33 · `test_peer_tools` 23/23。
+
 ## 0.5.3 — 2026-10-25
 **上游复核 v0.5.2 后追加的非阻断修复（P1–P3）。**
 

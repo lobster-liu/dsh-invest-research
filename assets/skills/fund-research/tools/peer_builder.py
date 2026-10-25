@@ -131,6 +131,27 @@ def fetch_tracking_target(code):
     return parse_tracking_target(html)
 
 
+def fetch_fund_identity(code):
+    """列表外代码的兜底：从基金主页抓简称/类型，返回 {'fund_name','fund_type'}。
+
+    用于 --codes 里东财全量列表未收录的代码。**拿不到类型时不得据此判"非被动型"
+    而误拒**——类型未知的候选交判定 A（跟踪标的严格相等）兜底，并记 Agent-P1 复核。
+    """
+    try:
+        html = http_get(f'https://fund.eastmoney.com/{code}.html', timeout=20)
+    except Exception:
+        return {}
+    out = {}
+    m = re.search(r'<title>([^<]+)</title>', html, re.S)
+    if m:
+        out['fund_name'] = (m.group(1).split(' - ')[0].split('_')[0]
+                            .replace('基金资料', '').strip())
+    m = re.search(r'基金类型[^<]*<[^>]*>([^<]{1,40})', html)
+    if m:
+        out['fund_type'] = m.group(1).strip()
+    return out
+
+
 def is_passive(fund_type):
     """被动型 = 指数型-股票 / 指数型-其他 / ETF 等。主动混合/股票/债券 均非同业。"""
     if not fund_type:
@@ -220,6 +241,9 @@ def normalize_codes(raw):
 
 def build(args):
     now = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+    if args.max_candidates < 1:
+        print('错误: --max-candidates 必须 >= 1（传 0 会把候选全部截断）', file=sys.stderr)
+        return 1
     anchor_code = normalize_code(args.anchor)
     padded = []
     if anchor_code != (args.anchor or '').strip():
@@ -264,8 +288,14 @@ def build(args):
             if f:
                 candidates.append(f)
             else:
-                # 用户给的代码不在列表里，也允许，后续靠抓取跟踪标的判定
-                candidates.append({'fund_code': c, 'fund_name': '', 'fund_type': ''})
+                # 列表外代码：先抓基金页取简称/类型（拿不到就保留空类型，
+                # 交判定 A 兜底，绝不按"非被动型"误拒——东财列表未收录的新基金/特殊代码
+                # 不应因此被排除）。
+                ident = fetch_fund_identity(c)
+                cand = {'fund_code': c, 'fund_name': '', 'fund_type': ''}
+                cand.update(ident)
+                cand['fund_code'] = c
+                candidates.append(cand)
         source = 'user-list'
     else:
         kw = args.keyword or ''
@@ -301,6 +331,7 @@ def build(args):
     # 第三步：逐只核对
     peers = []
     rejected = list(pre_rejected)
+    type_unknown_codes = []
     anchor_stem = strip_share_class(anchor_name)
     anchor_struct = detect_structure(anchor_name) if anchor_name else ''
     anchor_share = detect_share_class(anchor_name, anchor_code) if anchor_name else ''
@@ -316,8 +347,13 @@ def build(args):
         struct = detect_structure(name)
         stem = strip_share_class(name)
 
-        # 判定 B：主动型剔除
-        if not is_passive(ftype):
+        # 判定 B：主动型剔除。
+        # ⚠️ 类型未知（列表外代码且页面也取不到）时不得据此拒绝——交给判定 A
+        # （跟踪标的严格相等）兜底，并记 Agent-P1 复核该代码是否被动型。
+        type_unknown = not ftype
+        if type_unknown:
+            type_unknown_codes.append(code)
+        elif not is_passive(ftype):
             rejected.append({'code': code, 'name': name, 'type': ftype,
                              'reason': f'非被动型({ftype})，不构成同标的同业'})
             continue
@@ -355,6 +391,7 @@ def build(args):
             'code': code,
             'name': name,
             'fund_type': ftype,
+            'type_unknown': type_unknown,
             'tracking_target': cand_track,
             'share_class': share,
             'structure': struct,
@@ -404,6 +441,7 @@ def build(args):
             'trading_status（封闭期/暂停申购/暂停大额申购）—— 脚本不读交易状态，必须 Agent-P1 人工复核',
             'share_class_consistency（A 只对 A，C 只对 C）—— 脚本只输出 share_class 字段，不做分组剔除，必须 Agent-P1 复核',
         ],
+        'type_unknown_codes': type_unknown_codes,
         'comparability': {
             'comparable': [p['code'] for p in peers if p['comparability']['verdict'] == 'comparable'],
             'comparable_with_caveat':
@@ -418,6 +456,11 @@ def build(args):
         'rejected_count': len(rejected),
         'gaps': gaps,
     }
+
+    if type_unknown_codes:
+        result['agent_review_required'].append(
+            f'type_unverified({",".join(type_unknown_codes)})：列表外代码的类型未从全量列表/'
+            '基金页确认，仅凭跟踪标的严格相等入选，须 Agent-P1 复核是否被动型')
 
     with open(args.out, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
@@ -445,7 +488,7 @@ def main():
                     help='逗号分隔的候选同业代码，必须加引号；给此则不用 keyword')
     ap.add_argument('--keyword', default='', help='名字关键词，自动搜索候选（如 "人工智能"）')
     ap.add_argument('--max-candidates', type=int, default=60,
-                    help='--keyword 路径下最多抓取多少只被动型候选（默认 60，'
+                    help='--keyword 路径下最多抓取多少只被动型候选（默认 60，须 >= 1；'
                          '防止命中量大时串行抓取耗时失控）')
     ap.add_argument('--track', default='', help='可选，直接指定锚点跟踪标的，跳过锚点抓取')
     args = ap.parse_args()

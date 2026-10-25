@@ -365,6 +365,46 @@ def test_build_keyword_prescreens_and_caps():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_build_out_of_list_code_not_rejected_as_nonpassive():
+    """回归：--codes 里的列表外代码，类型未知时不得被当成"非被动型"误拒。"""
+    d = _mk_tmpdir()
+    orig = (pb.load_fund_list, pb.fetch_fund_identity, pb.fetch_tracking_target)
+    try:
+        pb.load_fund_list = lambda: [
+            _row('012733', '天弘中证人工智能主题ETF联接A', '指数型-其他')]
+        pb.fetch_fund_identity = lambda code: {'fund_name': '某某新基金指数A', 'fund_type': ''}
+        pb.fetch_tracking_target = lambda code: '中证人工智能主题指数'
+        out = os.path.join(d, 'peers.json')
+        rc = pb.build(_ns(anchor='012733', out=out, track='中证人工智能主题指数',
+                          codes='999999'))
+        assert rc == 0
+        with open(out, encoding='utf-8') as f:
+            res = json.load(f)
+        rej = {r['code']: r['reason'] for r in res['rejected']}
+        assert '999999' not in rej, rej
+        assert res['type_unknown_codes'] == ['999999']
+        assert any('type_unverified' in a for a in res['agent_review_required'])
+        assert res['peers'][0]['code'] == '999999'
+        assert res['peers'][0]['type_unknown'] is True
+    finally:
+        pb.load_fund_list, pb.fetch_fund_identity, pb.fetch_tracking_target = orig
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_build_max_candidates_zero_errors():
+    """回归：--max-candidates=0 应报错，不能把候选全部截断。"""
+    d = _mk_tmpdir()
+    orig = pb.load_fund_list
+    pb.load_fund_list = lambda: [_row('012733', '锚点', '指数型-其他')]
+    try:
+        rc = pb.build(_ns(anchor='012733', out=os.path.join(d, 'p.json'),
+                          keyword='锚点', max_candidates=0))
+        assert rc == 1
+    finally:
+        pb.load_fund_list = orig
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     tests = [(k, v) for k, v in list(globals().items())
              if k.startswith('test_') and callable(v)]

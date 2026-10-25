@@ -115,7 +115,7 @@ New-Item -ItemType Directory -Path "$CMP" -Force
 & "$PY" "$TOOLS/peer_builder.py" --anchor '<锚点代码>' --codes '<同业代码1,同业代码2>' --out "$CMP/peers.json"
 ```
 三种候选来源（`--codes` / `--keyword` / `--track`）：
-- `--codes`（**首选**，引用分隔代码）：精确、不消耗网络抓取。
+- `--codes`（**首选**，引用分隔代码）：精确、不消耗网络抓取。列表外代码会先抓基金页取简称/类型；**类型仍取不到时不按"非被动型"误拒**，而是交跟踪标的严格相等兜底，并记入 `type_unknown_codes[]` 与 `agent_review_required` 待复核。
 - `--keyword`（名字关键词）：命中量大时**先按被动型预筛、再按 `--max-candidates`（默认 60）截断**，超限会在 `rejected` / `gaps` 里显式标注，**不代表全量命中**；命中再多时改用 `--codes`。**耗时风险**：候选是**串行**逐只抓主页，单只超时 20s，上限 60 时最坏 ≈ 20 分钟；优先用 `--codes`。
 - `--track`（直接指定锚点跟踪标的）：**只跳过锚点抓取，仍会从全量列表解析锚点简称**，判据 C 正常生效；若锚点不在列表则 `anchor.name` 写占位符 `(未解析，须 Agent-P1 从 fund.json 补齐)`，并在 `gaps` 标注。
 `peer_builder.py` 实际执行 **3 条剔除 + 1 条标记**：①跟踪标的不严格相等 ②非被动型 ③与锚点属同一基金的不同份额（按 `strip_share_class()` 主体名比对）；结构差异（联接 vs 直投）只标记不剔除。**它不做对比判断**（对比判断留给多 agent）。

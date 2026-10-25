@@ -18,7 +18,9 @@ fixture 全部内联（不读外部文件）；把 ff._fetch 换成只喂 fixtur
 用法: python test_fund_tools.py
 退出码: 0 = 全部通过；1 = 有失败（修好前勿用于正式流水线）
 """
+import json
 import os
+import shutil
 import sys
 from datetime import datetime, timedelta
 
@@ -181,6 +183,33 @@ under = ff.compare_with_benchmark(FUND, [(d, 100.0 + i * 1.0) for i, d in enumer
 near('compare_with_benchmark 跑输时超额 = -0.10（符号正确）', under['区间超额收益'], -0.10)
 eq('compare_with_benchmark 共同交易日<20 -> 可用=False',
    ff.compare_with_benchmark(FUND[:5], BENCH[:5])['可用'], False)
+
+# ---------- 6. 版本解析（_resolve_version：回落值 / 清单身份） ----------
+check('VERSION 已对齐当前插件版本（不再滞后 0.3.0）',
+      ff.VERSION == ff._VERSION_FALLBACK and ff.VERSION != '0.3.0',
+      (ff.VERSION, ff._VERSION_FALLBACK))
+
+_vtmp = os.path.join(os.path.abspath(os.environ.get('FR_TEST_TMPDIR') or '.'),
+                     'fr_ver_%d' % os.getpid())
+os.makedirs(_vtmp, exist_ok=True)
+try:
+    # 无关 package.json（name 不匹配）不得被采用
+    _other = os.path.join(_vtmp, 'otherproj')
+    os.makedirs(_other)
+    with open(os.path.join(_other, 'package.json'), 'w', encoding='utf-8') as _f:
+        json.dump({'name': 'some-other-project', 'version': '9.9.9'}, _f)
+    got = ff._resolve_version(start=_other)
+    check('_resolve_version 忽略 name 不匹配的无关 package.json',
+          got == ff._VERSION_FALLBACK, got)
+    # 本插件清单（name 匹配）应被采用
+    _self = os.path.join(_vtmp, 'dsh-invest-research')
+    os.makedirs(_self)
+    with open(os.path.join(_self, 'package.json'), 'w', encoding='utf-8') as _f:
+        json.dump({'name': 'dsh-invest-research', 'version': '8.8.8'}, _f)
+    got2 = ff._resolve_version(start=_self)
+    check('_resolve_version 采用 name 匹配的本插件 package.json', got2 == '8.8.8', got2)
+finally:
+    shutil.rmtree(_vtmp, ignore_errors=True)
 
 for f in FAILS:
     print('  FAIL', f)
