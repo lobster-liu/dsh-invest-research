@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.7 — 2026-10-25
+**上游复核 v0.5.6 后的两条可选优化（非阻断，均已落地）。**
+
+1. **`test_fund_tools.py` 的 SKIP 提示不够醒目 / 无清单布局下守卫不生效**（上游可选 ①）：
+   原实现找不到插件清单时静默 `SKIP`，`_VERSION_FALLBACK` 的「防人肉抬值脱节」守卫随之失效。
+   → 改为：
+   - 无论是否带清单，**先校验 `_VERSION_FALLBACK` 是合法的 `x.y.z` 版本号**（格式闸，无清单布局下仍生效）；
+   - SKIP 时改为 **`⚠️ SKIP` 显式告警**，说明本布局下守卫不生效、请人工确认回落值。
+2. **`_resolve_version()` 的插件根依赖未写进安装约束**（上游可选 ②）：现要求插件根同时有
+   `assets/` + `package.json`，只拷 `skills/` 会静默回落版本、令人困惑。→ README「Install 安装」
+   新增**安装约束**说明（含 `_VERSION_FALLBACK` 回落预期与 `⚠️ SKIP` 提示）；
+   顺带修正 Quick check 里过期的 `npm run test:all` 计数（`21+27+30+14` → `21+27+37+23`）。
+
+### 测试
+- `test_fund_tools.py` **37 → 38 条**：新增 `_VERSION_FALLBACK 是合法的 x.y.z 版本号（无清单布局下仍生效）`。
+- 全量：`npm test` 21/21 · `test_gate` 27/27 · `test_fund_tools` 38/38 · `test_peer_tools` 23/23。
+
 ## 0.5.6 — 2026-10-25
 **上游复核 v0.5.5 后的唯一技术项收敛：测试自身跨安装形态可跑（纯测试改动，不影响运行时）。**
 

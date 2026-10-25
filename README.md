@@ -33,6 +33,12 @@ dsh plugin --profile <profile-name> add path/to/dsh-invest-research
 
 重启 DSH → 新会话里说 **"分析 600048"**（stock-research）或 **"分析基金 025490"**、**"穿透这只基金的持仓"**（fund-research）即触发；说 **"筛选基金"**、**"这只基金怎么样"**、**"基金经理画像"**、**"出一份 PDF 报告"** 则命中 pick-funds 套件。
 
+> **安装约束（v0.5.5 起）**：`fund-research/tools/fetch_fund.py` 的 `_resolve_version()` 依赖插件根
+> **同时存在 `assets/` 子目录与 `package.json`**（`name=="dsh-invest-research"`）来读真实版本；
+> **只拷贝 `skills/` 子目录**（没有插件根清单）时，版本会回落到脚本内的 `_VERSION_FALLBACK` 常量——
+> 属预期行为、不影响取数，但会让「防人肉抬值脱节」的同步守卫不生效（离线自测会打 `⚠️ SKIP` 显式告警）。
+> 手动拆分安装请连同插件根一起拷，或直接用 `dsh plugin add`。
+
 ## Quick check 安装自检
 
 ```bash
@@ -40,13 +46,13 @@ dsh plugin --profile <profile-name> add path/to/dsh-invest-research
 python assets/skills/stock-research/tools/fetch_data.py --code 600000 --out /tmp/sr/data.json
 # 2) 基金取数冒烟(需可访问 fund.eastmoney.com)
 python assets/skills/fund-research/tools/fetch_fund.py --code 025490 --out /tmp/fr/fund.json --peer-stocks 10
-# 3) 基金取数器离线自测(37 条断言,不依赖网络,期望 exit 0)
+# 3) 基金取数器离线自测(38 条断言,不依赖网络,期望 exit 0)
 python assets/skills/fund-research/tools/test_fund_tools.py
 # 4) 脱敏门禁行为自检(27 场景,期望 exit 0)
 python assets/skills/stock-research/tools/test_gate.py
 # 5) 对比层工具离线自测(23 条断言,期望 exit 0;含 ETF/联接份额、短码补零、--track 仍解析锚点名、关键词截断、https 回退、列表外代码不误拒)
 python assets/skills/fund-research/tools/test_peer_tools.py
-# 统一入口:npm test 跑 21 条注册冒烟;npm run test:all 跑全部(21+27+30+14)
+# 统一入口:npm test 跑 21 条注册冒烟;npm run test:all 跑全部(21+27+37+23)
 ```
 
 ## What's inside
@@ -60,8 +66,8 @@ python assets/skills/fund-research/tools/test_peer_tools.py
 | `install_akshare.ps1` / `requirements.txt` | **(v0.2.0)** 沙箱内离线装 akshare(Node fetch 下 wheel + `--no-index --find-links`),绕开 pip 平台临时目录 `WinError 5` 与 schannel 两个坑 |
 | `assets/skills/fund-research/SKILL.md` | **(v0.3.0 / v0.4.0)** 基金流程总纲:五阶段 + 阶段6 对比层、10 章报告、5 个结论标签、三种情景、跟踪清单、条件式行动、铁律 11(对比层必由独立 agent 派发) |
 | `assets/skills/fund-research/roles/*.md` ×10 | **(v0.3.0 / v0.4.0)** 协调员 + Agent1–Agent6 + 对比层 3 角色(`peer-orchestrator` / `peer-builder` / `peer-red-team`),统一提交格式 |
-| `assets/skills/fund-research/tools/fetch_fund.py` | **(v0.3.0 / 版本自 v0.5.5 起从本插件根 `package.json` 读,回落值 `_VERSION_FALLBACK` 有测试断言同步)** 基金身份/净值/多期持仓/行业配置/债券持仓/规模份额/持有人/资产配置/经理/基准对比/重仓股快照;多通道降级,**空数据退出码 1** |
-| `assets/skills/fund-research/tools/test_fund_tools.py` | **(v0.3.0)** 37 条离线断言(内联 fixture + 网络桩,零网络;`_pkg_version()` 跨仓库/Qoder 安装形态可跑) |
+| `assets/skills/fund-research/tools/fetch_fund.py` | **(v0.3.0 / 版本自 v0.5.5 起从本插件根 `package.json` 读,依赖插件根 `assets/` + `package.json` 同时存在;回落值 `_VERSION_FALLBACK` 有格式 + 同步双重测试断言)** 基金身份/净值/多期持仓/行业配置/债券持仓/规模份额/持有人/资产配置/经理/基准对比/重仓股快照;多通道降级,**空数据退出码 1** |
+| `assets/skills/fund-research/tools/test_fund_tools.py` | **(v0.3.0)** 38 条离线断言(内联 fixture + 网络桩,零网络;`_pkg_version()` 跨仓库/Qoder 安装形态可跑,无清单时打印 `⚠️ SKIP` 显式告警) |
 | `assets/skills/fund-research/tools/peer_builder.py` | **(v0.5.5)** 同业筛选器:**脚本执行 3 条**(跟踪标的严格相等 / 仅被动型 / 非同一基金不同份额)+ **标记 1 条**(结构差异);**交易状态与份额类别一致性不执行**,写入 `agent_review_required[]` 交 Agent-P1 人工复核,**只筛不评**;候选支持 `--codes`(列表外代码先抓身份页兜底,类型仍未知时记 `type_unknown_codes[]` + `agent_review_required(type_unverified)`,不按非被动型误拒)/ `--keyword`(被动型预筛 + `--max-candidates>=1` 上限)/ `--track`(仍解析锚点简称,不静默关掉判据 C);基金列表源 https 优先、**抓取与解析失败都回退 http** |
 | `assets/skills/fund-research/tools/comparator.py` | **(v0.4.0)** 对比矩阵生成器:读 `peers.json` + 各基金 `report.md`/`fund.json`,对齐已冻结结论、暴露口径冲突,**不重算指标** |
 | `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.5.4)** 对比层 23 条离线断言(含 `某ETF` 不得判成 F 份额、`11839→011839` 补零、`--track` 不得让判据 C 失效、`--keyword` 预筛+截断+下限、https 连接层/解析层回退、列表外代码不得按非被动型误拒六项回归;纯逻辑 + 工作区临时目录 fixture,零网络) |

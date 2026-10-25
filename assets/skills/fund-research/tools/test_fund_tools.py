@@ -20,6 +20,7 @@ fixture 全部内联（不读外部文件）；把 ff._fetch 换成只喂 fixtur
 """
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime, timedelta
@@ -231,9 +232,16 @@ def _pkg_version(start=None):
 
 
 _pkg_v = _pkg_version()
+# 无论是否带清单，先校验回落值的格式——这是"防人肉抬值脱节"的最后一道闸，
+# 在无清单的独立安装里也会生效（只是无法与真实版本比对）。
+check('_VERSION_FALLBACK 是合法的 x.y.z 版本号（无清单布局下仍生效）',
+      bool(re.match(r'^\d+\.\d+\.\d+$', ff._VERSION_FALLBACK)),
+      ff._VERSION_FALLBACK)
 if _pkg_v is None:
-    # 非仓库/无清单布局：跳过同步断言，测试自身仍可跑
-    print('SKIP _VERSION_FALLBACK 与插件清单版本同步（未找到插件清单，跨安装形态）')
+    # 非仓库/无清单布局：跳过与清单的同步断言，但**显式告警**，避免静默失效
+    print('⚠️  SKIP _VERSION_FALLBACK 与插件清单版本同步：未找到 .qoder-plugin/plugin.json '
+          '或带 assets/ 的 name=="dsh-invest-research" package.json；'
+          '本布局下版本一致性守卫不生效，请人工确认回落值')
 else:
     check('_VERSION_FALLBACK 与 package.json.version 同步（防人肉抬值脱节）',
           ff._VERSION_FALLBACK == _pkg_v, (ff._VERSION_FALLBACK, _pkg_v))
