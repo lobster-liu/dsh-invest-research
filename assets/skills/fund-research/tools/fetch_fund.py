@@ -43,25 +43,26 @@ except Exception:
 
 _PLUGIN_PKG_NAME = 'dsh-invest-research'
 # 单独拷走运行、又找不到本插件 package.json 时的回落值（与 package.json 同步）。
-_VERSION_FALLBACK = '0.5.4'
+_VERSION_FALLBACK = '0.5.5'
 
 
 def _resolve_version(start=None):
-    """工具版本：向上找本插件的 package.json（避免与插件版本脱节）。
+    """工具版本：向上找本插件根目录的 package.json（避免与插件版本脱节）。
 
-    **只认 `name == 'dsh-invest-research'` 的清单**——否则可能命中安装路径之上
-    的无关 package.json，读出别的项目版本。脚本可被单独拷走运行，
+    **插件根 = 同时满足 `name == 'dsh-invest-research'` 且目录下存在 `assets/` 子目录**。
+    这样安装路径之上碰巧出现的同名清单不会被误认；脚本可被单独拷走运行，
     找不到就回落字面量 `_VERSION_FALLBACK`。`start` 仅用于测试注入。
     """
     here = start or os.path.dirname(os.path.abspath(__file__))
     for _ in range(6):
         try:
-            with open(os.path.join(here, 'package.json'), encoding='utf-8') as fh:
-                pkg = json.load(fh)
-            if pkg.get('name') == _PLUGIN_PKG_NAME:
-                v = pkg.get('version')
-                if v:
-                    return v
+            if os.path.isdir(os.path.join(here, 'assets')):
+                with open(os.path.join(here, 'package.json'), encoding='utf-8') as fh:
+                    pkg = json.load(fh)
+                if pkg.get('name') == _PLUGIN_PKG_NAME:
+                    v = pkg.get('version')
+                    if v:
+                        return v
         except Exception:
             pass
         parent = os.path.dirname(here)

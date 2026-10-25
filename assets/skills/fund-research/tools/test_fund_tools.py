@@ -184,10 +184,22 @@ near('compare_with_benchmark 跑输时超额 = -0.10（符号正确）', under['
 eq('compare_with_benchmark 共同交易日<20 -> 可用=False',
    ff.compare_with_benchmark(FUND[:5], BENCH[:5])['可用'], False)
 
-# ---------- 6. 版本解析（_resolve_version：回落值 / 清单身份） ----------
+# ---------- 6. 版本解析（_resolve_version：回落值 / 清单身份 / 插件根标记） ----------
 check('VERSION 已对齐当前插件版本（不再滞后 0.3.0）',
       ff.VERSION == ff._VERSION_FALLBACK and ff.VERSION != '0.3.0',
       (ff.VERSION, ff._VERSION_FALLBACK))
+
+
+def _pkg_version():
+    """本插件根的 package.json.version（真值来源）。"""
+    root = os.path.abspath(os.path.join(HERE, '..', '..', '..', '..'))
+    with open(os.path.join(root, 'package.json'), encoding='utf-8') as fh:
+        return json.load(fh).get('version')
+
+
+check('_VERSION_FALLBACK 与 package.json.version 同步（防人肉抬值脱节）',
+      ff._VERSION_FALLBACK == _pkg_version(),
+      (ff._VERSION_FALLBACK, _pkg_version()))
 
 _vtmp = os.path.join(os.path.abspath(os.environ.get('FR_TEST_TMPDIR') or '.'),
                      'fr_ver_%d' % os.getpid())
@@ -201,13 +213,22 @@ try:
     got = ff._resolve_version(start=_other)
     check('_resolve_version 忽略 name 不匹配的无关 package.json',
           got == ff._VERSION_FALLBACK, got)
-    # 本插件清单（name 匹配）应被采用
+    # name 匹配但**没有 assets 子目录**（非插件根）也不得被采用
+    _noassets = os.path.join(_vtmp, 'samename-noassets')
+    os.makedirs(_noassets)
+    with open(os.path.join(_noassets, 'package.json'), 'w', encoding='utf-8') as _f:
+        json.dump({'name': 'dsh-invest-research', 'version': '7.7.7'}, _f)
+    got_na = ff._resolve_version(start=_noassets)
+    check('_resolve_version 要求目录下存在 assets/（插件根标记），否则不认',
+          got_na == ff._VERSION_FALLBACK, got_na)
+    # 本插件根（name 匹配 + assets/ 存在）应被采用
     _self = os.path.join(_vtmp, 'dsh-invest-research')
-    os.makedirs(_self)
+    os.makedirs(os.path.join(_self, 'assets'))
     with open(os.path.join(_self, 'package.json'), 'w', encoding='utf-8') as _f:
         json.dump({'name': 'dsh-invest-research', 'version': '8.8.8'}, _f)
     got2 = ff._resolve_version(start=_self)
-    check('_resolve_version 采用 name 匹配的本插件 package.json', got2 == '8.8.8', got2)
+    check('_resolve_version 采用 name 匹配且带 assets/ 的插件根 package.json',
+          got2 == '8.8.8', got2)
 finally:
     shutil.rmtree(_vtmp, ignore_errors=True)
 

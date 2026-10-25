@@ -1,43 +1,27 @@
 # Changelog
 
-## 0.5.1 — 2026-10-24
-**修复上游 v0.4.0 复盘指出的 10 项问题（P0×4 / P1×3 / P2×3）。本轮不新增功能，只让"声明"与"实现"对齐。**
+## 0.5.5 — 2026-10-25
+**上游复核确认 v0.5.3 / v0.5.4 后，对 3 项遗留 P3 的收敛（不新增功能）。**
 
-### P0 · 实现与声明不符（已修）
-1. **`peer_builder.py` docstring 声称 6 条铁律、实际只执行 3 条** → docstring 改为三段式如实陈述：
-   **脚本执行 3 条**（跟踪标的严格相等 / 仅被动型 / 非同一基金不同份额）+ **只标记 1 条**（结构差异）
-   + **脚本不执行、须 Agent-P1 人工复核 2 条**（交易状态、份额类别一致性）。
-   `peers.json` 新增 `criteria_executed[]` 与 `agent_review_required[]` 两个字段，把"哪些是脚本判的、
-   哪些要人判"变成机器可读契约。
-2. **`detect_share_class()` 把基金类型后缀误当份额类别**（`某ETF` → `F` 份额）→ 新增
-   `TYPE_TAIL_WORDS`（发起式联接/ETF联接/联接/LOF/FOF/QDII/ETF/指数增强/指数/增强/基金）
-   与 `CURRENCY_PAREN`，**先剥类型缩写与币种括号、再匹配末位字母**。
-3. **`--codes` 未补前导零**（传 `11839` 直接「未找到」）→ 新增 `normalize_code()` / `normalize_codes()`，
-   锚点与候选一律 `zfill(6)`，并打印 `[代码归一] 11839→011839`。
-   *（`roles/peer-builder.md` 从 0.4.0 起就写着"脚本已 zfill(6) 兜底"——但代码里没有。本次补上实现，
-   文档这次没有说谎：是代码在说谎。）*
-4. **peer 角色未接入主流程**（4 个 peer 角色 + 对比层从未写进角色表/执行流程）→ 0.4.0 的 SKILL.md
-   已补「阶段 6 + 对比层角色表 + 对比层铁律」，本次复核确认**已接入**，并补齐 `$CMP` 目录约定。
+1. **`roles/peer-builder.md` 未同步 v0.5.4 的新行为**（上游 P3 ①）：v0.5.4 只在 SKILL.md 写了
+   「列表外代码 → `fetch_fund_identity()` / `type_unknown_codes[]` /
+   `agent_review_required(type_unverified)`」，角色文件没改 → Agent-P1 按旧角色文件执行时
+   不知道要复核这一项。→ 补进 `roles/peer-builder.md` 的**「核对筛选依据」**（列表外代码说明）
+   与**「字段契约」**（`type_unknown_codes` 行）。
+2. **`_VERSION_FALLBACK` 仍是手写常量**（上游 P3 ②）：漏改就会重现"包版本 X、脚本报 Y"的脱节。
+   → 新增**一致性断言**：`test_fund_tools.py` 读插件根 `package.json.version`，断言
+   `_VERSION_FALLBACK == package.json.version`。发版抬版本时若漏改回落值，测试直接失败。
+3. **`_resolve_version()` 搜索范围再收紧**（上游 P3 ③）：已加 `name == 'dsh-invest-research'`
+   校验，现**再加插件根标记**——只认**目录下同时存在 `assets/`** 的清单，进一步避免安装路径之上
+   碰巧出现同名清单；真实路径（`<插件根>/assets/skills/fund-research/tools/`）向上 5 级命中插件根，
+   安装路径（`node_modules/dsh-invest-research/...`）同样命中。补 1 条测试
+   （name 匹配但无 `assets/` → 不认）。
 
-### P1 · 对比层流程缺陷（已修）
-5. **`peer-orchestrator.md` 缺"必须由协调员亲自派发"硬约束** → 已有「铁律 11」段落；本次补
-   **第 0 步：$CMP 目录约定**（先建目录再派发，且"对比产物只在工作区生成，绝不写回插件目录"）。
-6. **未要求 4 角色"同一消息内并行派发 + 互不引用对方结论"** → `peer-orchestrator.md` 第 2 步
-   明确「**同一批**派发」「互不引用对方结论」；SKILL.md 阶段 3/6 同步。
-7. **`peer-red-team.md` 缺"未找到反向证据也要标注方向"强制项** → 新增**「方向性核对表」**：
-   维度（申赎冲击/流动性/冲击成本/换手）× 是否覆盖 × 方向（利于 A / 利于 B / 不可判定），
-   并要求三选一显式结论——**"未找到反向证据"本身必须写出来，不允许留空**。
-
-### P2 · 文案/口径问题（已修）
-8. **`peer-builder.md` 输出结构与脚本实际 JSON 不一致**（角色写"接受同业/拒绝同业"，脚本写
-   `anchor/peers/rejected` → 下游按名读 `KeyError`）→ 新增**字段契约表**（含 `comparability` 三个分组），
-   并明确「禁止使用中文字段名」。
-9. **`$CMP` 目录约定缺失** → 新增 `$CMP` 结构块：`peers.json`（脚本所有，任何角色不得手改）/
-   `peer-review.md`（Agent-P1 复核产物）/ `work/` / `comparison.md`。
-   **Agent-P1 不再"往 peers.json 里追加说明"**（脚本产物只读），改为写独立 `peer-review.md`。
-10. **"实测高发"案例数字易被当通用结论** → `peer-red-team.md` / `peer-orchestrator.md` / SKILL.md
-    对比层铁律中的 `1.38%`、`2.24%`、`43.51亿 vs 120.51亿`、`3.97%`、`≈54%` 全部标注
-    **「历史案例 / 示例数据，非通用统计，须按本次实测重算」**。
+### 测试
+- `test_fund_tools.py` **33 → 35 条**：新增 `_VERSION_FALLBACK 与 package.json.version 同步`、
+  `_resolve_version 要求目录下存在 assets/（插件根标记），否则不认`；原
+  `_resolve_version 采用 name 匹配的本插件 package.json` 升级为带 `assets/` 的插件根。
+- 全量：`npm test` 21/21 · `test_gate` 27/27 · `test_fund_tools` 35/35 · `test_peer_tools` 23/23。
 
 ## 0.5.4 — 2026-10-25
 **上游复核第三轮修复（4 项 P3）+ 版本解析加固。**
@@ -139,6 +123,45 @@
 - 全量：`npm test` 21/21 · `test_gate` 27/27 · `test_fund_tools` 30/30 · `test_peer_tools` 18/18 ·
   `report-render/selftest.py` PDF 半程通过（5 页 PDF 真实生成）；**docx 排版量测 / xlsx 公式重算
   依赖 LibreOffice，本机未装好，已如实降级为「未测量 / recalc_unavailable」，不假装通过。**
+
+## 0.5.1 — 2026-10-24
+**修复上游 v0.4.0 复盘指出的 10 项问题（P0×4 / P1×3 / P2×3）。本轮不新增功能，只让"声明"与"实现"对齐。**
+
+### P0 · 实现与声明不符（已修）
+1. **`peer_builder.py` docstring 声称 6 条铁律、实际只执行 3 条** → docstring 改为三段式如实陈述：
+   **脚本执行 3 条**（跟踪标的严格相等 / 仅被动型 / 非同一基金不同份额）+ **只标记 1 条**（结构差异）
+   + **脚本不执行、须 Agent-P1 人工复核 2 条**（交易状态、份额类别一致性）。
+   `peers.json` 新增 `criteria_executed[]` 与 `agent_review_required[]` 两个字段，把"哪些是脚本判的、
+   哪些要人判"变成机器可读契约。
+2. **`detect_share_class()` 把基金类型后缀误当份额类别**（`某ETF` → `F` 份额）→ 新增
+   `TYPE_TAIL_WORDS`（发起式联接/ETF联接/联接/LOF/FOF/QDII/ETF/指数增强/指数/增强/基金）
+   与 `CURRENCY_PAREN`，**先剥类型缩写与币种括号、再匹配末位字母**。
+3. **`--codes` 未补前导零**（传 `11839` 直接「未找到」）→ 新增 `normalize_code()` / `normalize_codes()`，
+   锚点与候选一律 `zfill(6)`，并打印 `[代码归一] 11839→011839`。
+   *（`roles/peer-builder.md` 从 0.4.0 起就写着"脚本已 zfill(6) 兜底"——但代码里没有。本次补上实现，
+   文档这次没有说谎：是代码在说谎。）*
+4. **peer 角色未接入主流程**（4 个 peer 角色 + 对比层从未写进角色表/执行流程）→ 0.4.0 的 SKILL.md
+   已补「阶段 6 + 对比层角色表 + 对比层铁律」，本次复核确认**已接入**，并补齐 `$CMP` 目录约定。
+
+### P1 · 对比层流程缺陷（已修）
+5. **`peer-orchestrator.md` 缺"必须由协调员亲自派发"硬约束** → 已有「铁律 11」段落；本次补
+   **第 0 步：$CMP 目录约定**（先建目录再派发，且"对比产物只在工作区生成，绝不写回插件目录"）。
+6. **未要求 4 角色"同一消息内并行派发 + 互不引用对方结论"** → `peer-orchestrator.md` 第 2 步
+   明确「**同一批**派发」「互不引用对方结论」；SKILL.md 阶段 3/6 同步。
+7. **`peer-red-team.md` 缺"未找到反向证据也要标注方向"强制项** → 新增**「方向性核对表」**：
+   维度（申赎冲击/流动性/冲击成本/换手）× 是否覆盖 × 方向（利于 A / 利于 B / 不可判定），
+   并要求三选一显式结论——**"未找到反向证据"本身必须写出来，不允许留空**。
+
+### P2 · 文案/口径问题（已修）
+8. **`peer-builder.md` 输出结构与脚本实际 JSON 不一致**（角色写"接受同业/拒绝同业"，脚本写
+   `anchor/peers/rejected` → 下游按名读 `KeyError`）→ 新增**字段契约表**（含 `comparability` 三个分组），
+   并明确「禁止使用中文字段名」。
+9. **`$CMP` 目录约定缺失** → 新增 `$CMP` 结构块：`peers.json`（脚本所有，任何角色不得手改）/
+   `peer-review.md`（Agent-P1 复核产物）/ `work/` / `comparison.md`。
+   **Agent-P1 不再"往 peers.json 里追加说明"**（脚本产物只读），改为写独立 `peer-review.md`。
+10. **"实测高发"案例数字易被当通用结论** → `peer-red-team.md` / `peer-orchestrator.md` / SKILL.md
+    对比层铁律中的 `1.38%`、`2.24%`、`43.51亿 vs 120.51亿`、`3.97%`、`≈54%` 全部标注
+    **「历史案例 / 示例数据，非通用统计，须按本次实测重算」**。
 
 ## 0.5.0 — 2026-10-24
 - **新增 pick-funds 分析师套件（8 个技能，移植自 ZCode 官方插件 pick-funds v0.1.1，DSH 原生版）**：

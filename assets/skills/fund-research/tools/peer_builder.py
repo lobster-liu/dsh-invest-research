@@ -24,6 +24,10 @@ peer_builder.py —— fund-research 同业构建器（阶段 6 对比层第一�
   · share_class 由简称末位字母推断，是**启发式**而非披露字段；
     类型/联接缩写（ETF / LOF / FOF / QDII / 联接）结尾已排除，不会被误判成份额类别。
     识别不出的份额类别（share_class 为空）一律记为「未取得，须人工核对」。
+  · `--codes` 里的**列表外代码**（东财全量列表未收录）会先抓基金页取简称/类型；
+    类型仍取不到时**不按"非被动型"误拒**，而是交判据 A（跟踪标的严格相等）兜底，
+    记入 `type_unknown_codes[]` 与 `agent_review_required`（`type_unverified`），
+    须 Agent-P1 复核其是否确为被动型。
   · 结构化字段 comparability 只表达"脚本能证明的前提"，不表达"可对比谁更优"。
 
 用法（bash / PowerShell 均可，`"$PY"` 写法两边通用；--codes 一律加引号，脚本内 zfill(6) 兜底）：

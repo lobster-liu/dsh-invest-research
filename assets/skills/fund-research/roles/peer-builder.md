@@ -56,6 +56,8 @@ New-Item -ItemType Directory -Path "$CMP" -Force
 
 **份额类别是启发式字段**：由简称末位字母推断，已排除 ETF/LOF/FOF/QDII/联接/指数/增强/基金 等类型缩写结尾（`某ETF` 不再被误判为 F 份额），但仍**不是披露字段**，识别不出（`share_class` 为 `''`）时必须在 `peer-review.md` 写「未取得，须人工核对」。
 
+**⚠️ 列表外代码（v0.5.4 新增行为）**：`--codes` 里东财全量列表未收录的代码，脚本会先抓基金页取简称/类型（`fetch_fund_identity()`）。**类型仍取不到时不得按"非被动型"误拒**——跳过判据 B、交判据 A（跟踪标的严格相等）兜底，并记入 `peers.json` 的 `type_unknown_codes[]`，同时在 `agent_review_required` 里追加一条 `type_unverified`。你**必须**对这部分代码逐一复核它是否确为被动型，再决定是否纳入同业；复核结论写进 `peer-review.md`。
+
 候选若被拒，拒绝理由写在 `peers.json` 的 `rejected[]` 里。**你必须把拒绝理由原样保留在 `peer-review.md`**，不得静默丢弃。
 
 ### 3. `peers.json` 字段契约（下游按这些名字读，别用中文别名）
@@ -71,6 +73,7 @@ New-Item -ItemType Directory -Path "$CMP" -Force
 | `comparability.undeterminable` | string[] | 被判据 A/B/C 剔除的代码 |
 | `peers[]` | object[] | `{code, name, fund_type, tracking_target, share_class, structure, same_stem, comparability{tracking_target,structure,share_class,verdict}}` |
 | `rejected[]` | object[] | `{code, name, type, reason}` |
+| `type_unknown_codes` | string[] | **v0.5.4**：类型未能从全量列表/基金页确认的代码（列表外代码），仅凭跟踪标的相等入选，**必须人工复核是否被动型** |
 | `gaps` | string[] | 仍需补齐的字段 |
 
 **禁止**读写 `接受同业 / 拒绝同业` 这类中文键名——脚本不产出它们（上游 v0.4.0 文档曾这么写，下游按名读会 `KeyError`）。
