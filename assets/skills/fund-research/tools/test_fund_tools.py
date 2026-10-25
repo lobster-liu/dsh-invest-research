@@ -190,16 +190,53 @@ check('VERSION 已对齐当前插件版本（不再滞后 0.3.0）',
       (ff.VERSION, ff._VERSION_FALLBACK))
 
 
-def _pkg_version():
-    """本插件根的 package.json.version（真值来源）。"""
-    root = os.path.abspath(os.path.join(HERE, '..', '..', '..', '..'))
-    with open(os.path.join(root, 'package.json'), encoding='utf-8') as fh:
-        return json.load(fh).get('version')
+def _pkg_version(start=None):
+    """插件版本真值：向上找 `.qoder-plugin/plugin.json` →
+    带 `assets/` 标记的 `name=='dsh-invest-research'` package.json；都没有返回 None。
+
+    **跨安装形态可跑**：Qoder 等把 `skills/fund-research/tools` 独立安装时，
+    上面没有仓库根 package.json，不能写死 `HERE/../../../..`。返回 None 时
+    对应断言跳过（不影响运行时代码）。`start` 仅用于测试注入。
+    """
+    here = start or HERE
+    for _ in range(6):
+        # Qoder 插件根标记：.qoder-plugin/plugin.json
+        qp = os.path.join(here, '.qoder-plugin', 'plugin.json')
+        if os.path.isfile(qp):
+            try:
+                with open(qp, encoding='utf-8') as fh:
+                    v = json.load(fh).get('version')
+                if v:
+                    return v
+            except Exception:
+                pass
+        # 本插件根：name 匹配 + assets/ 标记
+        if os.path.isdir(os.path.join(here, 'assets')):
+            pj = os.path.join(here, 'package.json')
+            if os.path.isfile(pj):
+                try:
+                    with open(pj, encoding='utf-8') as fh:
+                        pkg = json.load(fh)
+                    if pkg.get('name') == 'dsh-invest-research':
+                        v = pkg.get('version')
+                        if v:
+                            return v
+                except Exception:
+                    pass
+        parent = os.path.dirname(here)
+        if parent == here:
+            break
+        here = parent
+    return None
 
 
-check('_VERSION_FALLBACK 与 package.json.version 同步（防人肉抬值脱节）',
-      ff._VERSION_FALLBACK == _pkg_version(),
-      (ff._VERSION_FALLBACK, _pkg_version()))
+_pkg_v = _pkg_version()
+if _pkg_v is None:
+    # 非仓库/无清单布局：跳过同步断言，测试自身仍可跑
+    print('SKIP _VERSION_FALLBACK 与插件清单版本同步（未找到插件清单，跨安装形态）')
+else:
+    check('_VERSION_FALLBACK 与 package.json.version 同步（防人肉抬值脱节）',
+          ff._VERSION_FALLBACK == _pkg_v, (ff._VERSION_FALLBACK, _pkg_v))
 
 _vtmp = os.path.join(os.path.abspath(os.environ.get('FR_TEST_TMPDIR') or '.'),
                      'fr_ver_%d' % os.getpid())
@@ -229,6 +266,20 @@ try:
     got2 = ff._resolve_version(start=_self)
     check('_resolve_version 采用 name 匹配且带 assets/ 的插件根 package.json',
           got2 == '8.8.8', got2)
+    # _pkg_version 跨安装形态：Qoder 布局认 .qoder-plugin/plugin.json
+    _qoder = os.path.join(_vtmp, 'qoder-root')
+    os.makedirs(os.path.join(_qoder, '.qoder-plugin'))
+    with open(os.path.join(_qoder, '.qoder-plugin', 'plugin.json'),
+              'w', encoding='utf-8') as _f:
+        json.dump({'name': 'dsh-invest-research', 'version': '6.6.6'}, _f)
+    got3 = _pkg_version(start=_qoder)
+    check('_pkg_version 认 Qoder 布局的 .qoder-plugin/plugin.json',
+          got3 == '6.6.6', got3)
+    # _pkg_version 找不到任何清单时返回 None（断言可跳过，不炸）
+    _nm = os.path.join(_vtmp, 'nomanifest')
+    os.makedirs(_nm)
+    check('_pkg_version 无清单时返回 None（跨安装形态可跑）',
+          _pkg_version(start=_nm) is None, _pkg_version(start=_nm))
 finally:
     shutil.rmtree(_vtmp, ignore_errors=True)
 

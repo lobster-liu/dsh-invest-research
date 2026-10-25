@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.6 — 2026-10-25
+**上游复核 v0.5.5 后的唯一技术项收敛：测试自身跨安装形态可跑（纯测试改动，不影响运行时）。**
+
+1. **`test_fund_tools.py` 的 `_pkg_version()` 只适用于仓库布局**（上游 P3）：原来写死
+   `HERE/../../../..` 取仓库根 `package.json`，Qoder 等把 `skills/fund-research/tools` 独立安装时
+   会直接 `FileNotFoundError`。→ 改为**向上找 `.qoder-plugin/plugin.json` → 带 `assets/` 标记的
+   `name=='dsh-invest-research'` 清单 → 都没有返回 `None`**；`None` 时同步断言**跳过**（打印 SKIP，
+   不计失败），测试自身在任何安装形态下都能跑完。
+
+### 测试
+- `test_fund_tools.py` **35 → 37 条**：新增 `_pkg_version 认 Qoder 布局的 .qoder-plugin/plugin.json`、
+  `_pkg_version 无清单时返回 None（跨安装形态可跑）`。
+- 全量：`npm test` 21/21 · `test_gate` 27/27 · `test_fund_tools` 37/37 · `test_peer_tools` 23/23。
+
 ## 0.5.5 — 2026-10-25
 **上游复核确认 v0.5.3 / v0.5.4 后，对 3 项遗留 P3 的收敛（不新增功能）。**
 

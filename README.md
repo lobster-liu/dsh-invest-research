@@ -40,7 +40,7 @@ dsh plugin --profile <profile-name> add path/to/dsh-invest-research
 python assets/skills/stock-research/tools/fetch_data.py --code 600000 --out /tmp/sr/data.json
 # 2) 基金取数冒烟(需可访问 fund.eastmoney.com)
 python assets/skills/fund-research/tools/fetch_fund.py --code 025490 --out /tmp/fr/fund.json --peer-stocks 10
-# 3) 基金取数器离线自测(35 条断言,不依赖网络,期望 exit 0)
+# 3) 基金取数器离线自测(37 条断言,不依赖网络,期望 exit 0)
 python assets/skills/fund-research/tools/test_fund_tools.py
 # 4) 脱敏门禁行为自检(27 场景,期望 exit 0)
 python assets/skills/stock-research/tools/test_gate.py
@@ -61,7 +61,7 @@ python assets/skills/fund-research/tools/test_peer_tools.py
 | `assets/skills/fund-research/SKILL.md` | **(v0.3.0 / v0.4.0)** 基金流程总纲:五阶段 + 阶段6 对比层、10 章报告、5 个结论标签、三种情景、跟踪清单、条件式行动、铁律 11(对比层必由独立 agent 派发) |
 | `assets/skills/fund-research/roles/*.md` ×10 | **(v0.3.0 / v0.4.0)** 协调员 + Agent1–Agent6 + 对比层 3 角色(`peer-orchestrator` / `peer-builder` / `peer-red-team`),统一提交格式 |
 | `assets/skills/fund-research/tools/fetch_fund.py` | **(v0.3.0 / 版本自 v0.5.5 起从本插件根 `package.json` 读,回落值 `_VERSION_FALLBACK` 有测试断言同步)** 基金身份/净值/多期持仓/行业配置/债券持仓/规模份额/持有人/资产配置/经理/基准对比/重仓股快照;多通道降级,**空数据退出码 1** |
-| `assets/skills/fund-research/tools/test_fund_tools.py` | **(v0.3.0)** 35 条离线断言(内联 fixture + 网络桩,零网络) |
+| `assets/skills/fund-research/tools/test_fund_tools.py` | **(v0.3.0)** 37 条离线断言(内联 fixture + 网络桩,零网络;`_pkg_version()` 跨仓库/Qoder 安装形态可跑) |
 | `assets/skills/fund-research/tools/peer_builder.py` | **(v0.5.5)** 同业筛选器:**脚本执行 3 条**(跟踪标的严格相等 / 仅被动型 / 非同一基金不同份额)+ **标记 1 条**(结构差异);**交易状态与份额类别一致性不执行**,写入 `agent_review_required[]` 交 Agent-P1 人工复核,**只筛不评**;候选支持 `--codes`(列表外代码先抓身份页兜底,类型仍未知时记 `type_unknown_codes[]` + `agent_review_required(type_unverified)`,不按非被动型误拒)/ `--keyword`(被动型预筛 + `--max-candidates>=1` 上限)/ `--track`(仍解析锚点简称,不静默关掉判据 C);基金列表源 https 优先、**抓取与解析失败都回退 http** |
 | `assets/skills/fund-research/tools/comparator.py` | **(v0.4.0)** 对比矩阵生成器:读 `peers.json` + 各基金 `report.md`/`fund.json`,对齐已冻结结论、暴露口径冲突,**不重算指标** |
 | `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.5.4)** 对比层 23 条离线断言(含 `某ETF` 不得判成 F 份额、`11839→011839` 补零、`--track` 不得让判据 C 失效、`--keyword` 预筛+截断+下限、https 连接层/解析层回退、列表外代码不得按非被动型误拒六项回归;纯逻辑 + 工作区临时目录 fixture,零网络) |
