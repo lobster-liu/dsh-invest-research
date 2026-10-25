@@ -41,7 +41,28 @@ try:
 except Exception:
     pass
 
-VERSION = '0.3.0'
+def _resolve_version():
+    """工具版本：向上找最近的 package.json（避免与插件版本脱节）。
+
+    脚本可被单独拷走运行，故不硬依赖仓库路径；找不到就回落字面量。
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(6):
+        try:
+            with open(os.path.join(here, 'package.json'), encoding='utf-8') as fh:
+                v = json.load(fh).get('version')
+            if v:
+                return v
+        except Exception:
+            pass
+        parent = os.path.dirname(here)
+        if parent == here:
+            break
+        here = parent
+    return '0.5.2'
+
+
+VERSION = _resolve_version()
 TRADING_DAYS = 244
 
 # 陈旧阈值（日历日）

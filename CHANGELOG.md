@@ -39,6 +39,31 @@
     对比层铁律中的 `1.38%`、`2.24%`、`43.51亿 vs 120.51亿`、`3.97%`、`≈54%` 全部标注
     **「历史案例 / 示例数据，非通用统计，须按本次实测重算」**。
 
+## 0.5.3 — 2026-10-25
+**上游复核 v0.5.2 后追加的非阻断修复（P1–P3）。**
+
+### 上游复核追加修复（第二轮）
+1. **P1/P2 `load_fund_list()` 的 https→http 回退只覆盖"解析失败"，不覆盖"连接失败"**（已实测复现）：
+   原实现 `raw = http_get(SEARCH_URL)` 在 try 之外，TLS/连接层直接拦截时异常先抛出、回退不执行；
+   `json.loads` 也在回退范围之外。→ 改为 `for url in (SEARCH_URL, SEARCH_URL_FALLBACK)` 循环，
+   **抓取与解析都放进 try**，连接层失败与畸形内容都触发回退；两者都失败抛
+   `RuntimeError('fundcode_search.js https/http 均失败: ...')`。补 3 条行为测试。
+2. **P3 `SKILL.md` 写「anchor.name 留空」与代码不符**（代码写占位符）→ 改为与代码一致的
+   `(未解析，须 Agent-P1 从 fund.json 补齐)`，避免下游按空字符串判断。
+3. **P3 docstring 说 bash/PowerShell 均可，但三条示例仍是 PowerShell 语法** → 示例改
+   `"$PY" peer_builder.py ...`（bash / PowerShell 通用）。
+4. **P3 `--keyword` 仍是串行抓取** → `SKILL.md` 注明最坏耗时（上限 60 × 单只 20s ≈ 20 分钟），
+   并保留「优先 --codes」的建议。
+5. **P3 `fetch_fund.py` `VERSION='0.3.0'` 滞后** → 改为**向上找最近的 `package.json` 读版本**，
+   找不到回落字面量；现解析为 `0.5.2`，不再与插件版本脱节。
+
+### 测试
+- `test_peer_tools.py` **18 → 21 条**：新增 `test_load_fund_list_falls_back_on_connection_failure`
+  （https 连接层失败 → 回退 http）、`test_load_fund_list_falls_back_on_parse_failure`
+  （https 返回畸形内容 → 回退 http）、`test_load_fund_list_both_fail_raises`（双失败抛错）。
+- 全量：`npm test` 21/21 · `test_gate` 27/27 · `test_fund_tools` 30/30 · `test_peer_tools` 21/21 ·
+  `report-render/selftest.py` PDF 半程通过。
+
 ## 0.5.2 — 2026-10-25
 **上游复核 v0.5.1 后追加修复（P0–P2）+ report-render / xlsx-author 环境准备。**
 **注意：docx 逐页视觉验收与 xlsx 公式重算仍依赖 LibreOffice，本机未装成功，走降级路径并如实标注。**

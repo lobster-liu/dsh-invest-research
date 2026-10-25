@@ -26,10 +26,10 @@ peer_builder.py —— fund-research 同业构建器（阶段 6 对比层第一�
     识别不出的份额类别（share_class 为空）一律记为「未取得，须人工核对」。
   · 结构化字段 comparability 只表达"脚本能证明的前提"，不表达"可对比谁更优"。
 
-用法（bash / PowerShell 均可；--codes 一律加引号，脚本内 zfill(6) 兜底）：
-  & $PY peer_builder.py --anchor 012733 --keyword 人工智能 --out peers.json
-  & $PY peer_builder.py --anchor 012733 --codes '011839,023461' --out peers.json
-  & $PY peer_builder.py --anchor 012733 --codes '011839,023461' --track 中证人工智能主题指数 --out peers.json
+用法（bash / PowerShell 均可，`"$PY"` 写法两边通用；--codes 一律加引号，脚本内 zfill(6) 兜底）：
+  "$PY" peer_builder.py --anchor 012733 --keyword 人工智能 --out peers.json
+  "$PY" peer_builder.py --anchor 012733 --codes '011839,023461' --out peers.json
+  "$PY" peer_builder.py --anchor 012733 --codes '011839,023461' --track 中证人工智能主题指数 --out peers.json
 """
 
 import argparse
@@ -79,19 +79,26 @@ def http_get(url, timeout=30):
 
 
 def load_fund_list():
-    """全量基金列表（约 2.8 万只）。返回 [{fund_code,fund_name,fund_type,...}]。"""
-    raw = http_get(SEARCH_URL)
-    try:
-        m = re.search(r'\[\s*\[.*?\]\s*\]', raw, re.S)
-        if not m:
-            raise RuntimeError('fundcode_search.js 解析失败')
-    except Exception:
-        # https 被中间设备拦截时回退 http（同一路径，仅协议不同）
-        raw = http_get(SEARCH_URL_FALLBACK)
-        m = re.search(r'\[\s*\[.*?\]\s*\]', raw, re.S)
-        if not m:
-            raise RuntimeError('fundcode_search.js 解析失败')
-    arr = json.loads(m.group(0))
+    """全量基金列表（约 2.8 万只）。返回 [{fund_code,fund_name,fund_type,...}]。
+
+    https 优先、http 回退。**抓取失败与解析失败都要触发回退**——
+    只把「解析」放进 try、把 `http_get` 留在外层，遇到 TLS/连接层拦截时
+    异常会先抛出，http 回退根本不会执行（已实测）。
+    """
+    arr = None
+    last = None
+    for url in (SEARCH_URL, SEARCH_URL_FALLBACK):
+        try:
+            raw = http_get(url)
+            m = re.search(r'\[\s*\[.*?\]\s*\]', raw, re.S)
+            if not m:
+                raise RuntimeError('fundcode_search.js 解析失败（未匹配到列表数组）')
+            arr = json.loads(m.group(0))
+            break
+        except Exception as e:
+            last = e
+    if arr is None:
+        raise RuntimeError(f'fundcode_search.js https/http 均失败: {last}')
     out = []
     for row in arr:
         if len(row) < 5:

@@ -229,6 +229,65 @@ def test_search_url_is_https():
     assert pb.SEARCH_URL_FALLBACK.startswith('http://')
 
 
+def test_load_fund_list_falls_back_on_connection_failure():
+    """回归：https 连接层直接失败（TLS 被拦）时必须回退 http，而不是直接抛异常。"""
+    calls = []
+
+    def fake_get(url, timeout=30):
+        calls.append(url)
+        if url == pb.SEARCH_URL:
+            raise OSError('schannel blocked')
+        return 'var allFundCode="[["012733","t","天弘中证人工智能主题ETF联接A","指数型-其他","x"]]"'
+
+    orig = pb.http_get
+    pb.http_get = fake_get
+    try:
+        rows = pb.load_fund_list()
+    finally:
+        pb.http_get = orig
+    assert calls[0] == pb.SEARCH_URL, calls
+    assert any(u == pb.SEARCH_URL_FALLBACK for u in calls), calls
+    assert rows[0]['fund_code'] == '012733'
+    assert rows[0]['fund_name'] == '天弘中证人工智能主题ETF联接A'
+
+
+def test_load_fund_list_falls_back_on_parse_failure():
+    """回归：https 可连接但返回畸形内容时也要回退 http。"""
+    calls = []
+
+    def fake_get(url, timeout=30):
+        calls.append(url)
+        if url == pb.SEARCH_URL:
+            return 'garbage-not-a-list'
+        return 'var allFundCode="[["011839","t","某某指数A","指数型-股票","x"]]"'
+
+    orig = pb.http_get
+    pb.http_get = fake_get
+    try:
+        rows = pb.load_fund_list()
+    finally:
+        pb.http_get = orig
+    assert any(u == pb.SEARCH_URL_FALLBACK for u in calls), calls
+    assert rows[0]['fund_code'] == '011839'
+
+
+def test_load_fund_list_both_fail_raises():
+    """https 与 http 都失败时，抛带双方信息的 RuntimeError。"""
+    def fake_get(url, timeout=30):
+        raise OSError('net down')
+
+    orig = pb.http_get
+    pb.http_get = fake_get
+    try:
+        try:
+            pb.load_fund_list()
+            raise AssertionError('should have raised')
+        except RuntimeError as e:
+            assert '均失败' in str(e)
+    finally:
+        pb.http_get = orig
+
+
 def test_build_track_still_resolves_anchor_name():
     """回归：--track 只跳过抓取跟踪标的，不得让判据 C（同基金不同份额）静默失效。"""
     d = _mk_tmpdir()
