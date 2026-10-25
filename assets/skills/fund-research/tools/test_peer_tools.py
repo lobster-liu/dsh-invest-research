@@ -15,6 +15,7 @@ fixture 用工作区内临时目录（不用 %TEMP%，DSH 沙箱拒绝平台临�
 
 运行：python test_peer_tools.py   （期望 exit 0）
 """
+import argparse
 import importlib.util
 import itertools
 import json
@@ -208,6 +209,101 @@ def test_build_matrix_ignores_no_data_dir():
         assert len(m['entries']) == 0
     finally:
         shutil.rmtree(base, ignore_errors=True)
+
+
+def _ns(**kw):
+    """造一个 build() 需要的 argparse.Namespace。"""
+    base = dict(anchor='012733', out='', codes='', keyword='', track='', max_candidates=60)
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def _row(code, name, ftype):
+    return {'fund_code': code, 'fund_name': name, 'fund_type': ftype,
+            'pinyin_abbr': '', 'pinyin_full': ''}
+
+
+def test_search_url_is_https():
+    """回归：基金列表源必须是 https（http 仅作回退）。"""
+    assert pb.SEARCH_URL.startswith('https://')
+    assert pb.SEARCH_URL_FALLBACK.startswith('http://')
+
+
+def test_build_track_still_resolves_anchor_name():
+    """回归：--track 只跳过抓取跟踪标的，不得让判据 C（同基金不同份额）静默失效。"""
+    d = _mk_tmpdir()
+    orig_list, orig_track = pb.load_fund_list, pb.fetch_tracking_target
+    try:
+        pb.load_fund_list = lambda: [
+            _row('012733', '天弘中证人工智能主题ETF联接A', '指数型-其他'),
+            _row('011839', '天弘中证人工智能主题ETF联接C', '指数型-其他'),
+            _row('023461', '某某人工智能指数A', '指数型-股票'),
+            _row('110022', '易方达消费行业股票', '股票型'),
+        ]
+        pb.fetch_tracking_target = lambda code: '中证人工智能主题指数'
+        out = os.path.join(d, 'peers.json')
+        rc = pb.build(_ns(anchor='012733', out=out, track='中证人工智能主题指数',
+                          codes='011839,023461,110022'))
+        assert rc == 0
+        with open(out, encoding='utf-8') as f:
+            res = json.load(f)
+        # 锚点名必须被解析出来（不能是空）
+        assert res['anchor']['name'] == '天弘中证人工智能主题ETF联接A'
+        assert res['anchor']['share_stem'] == '天弘中证人工智能主题ETF联接'
+        # 判据 C 生效：011839 是同基金 C 份额，必须被剔除
+        rej = {r['code']: r['reason'] for r in res['rejected']}
+        assert '011839' in rej and '同基金不同份额' in rej['011839']
+        # 判据 B 生效：110022 非被动型被拒
+        assert '110022' in rej and '非被动型' in rej['110022']
+        # 023461 通过
+        assert [p['code'] for p in res['peers']] == ['023461']
+    finally:
+        pb.load_fund_list, pb.fetch_tracking_target = orig_list, orig_track
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_build_track_unresolved_anchor_is_flagged():
+    """锚点不在列表 + --track：判据 C 失效，必须在 gaps 里显式标注。"""
+    d = _mk_tmpdir()
+    orig_list, orig_track = pb.load_fund_list, pb.fetch_tracking_target
+    try:
+        pb.load_fund_list = lambda: [_row('023461', '某某人工智能指数A', '指数型-股票')]
+        pb.fetch_tracking_target = lambda code: '中证人工智能主题指数'
+        out = os.path.join(d, 'peers.json')
+        rc = pb.build(_ns(anchor='999999', out=out, track='中证人工智能主题指数',
+                          codes='023461'))
+        assert rc == 0
+        with open(out, encoding='utf-8') as f:
+            res = json.load(f)
+        assert res['anchor']['name'] == '(未解析，须 Agent-P1 从 fund.json 补齐)'
+        assert any('判据 C' in g for g in res['gaps'])
+    finally:
+        pb.load_fund_list, pb.fetch_tracking_target = orig_list, orig_track
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_build_keyword_prescreens_and_caps():
+    """关键词路径：非被动型预筛不进抓取循环；超过上限要截断并显式标注。"""
+    d = _mk_tmpdir()
+    orig_list, orig_track = pb.load_fund_list, pb.fetch_tracking_target
+    try:
+        rows = [_row(f'10000{i}', '测试智能指数A', '指数型-股票') for i in range(5)]
+        rows.append(_row('110022', '测试智能股票', '股票型'))
+        pb.load_fund_list = lambda: rows
+        pb.fetch_tracking_target = lambda code: '某指数'
+        out = os.path.join(d, 'peers.json')
+        rc = pb.build(_ns(anchor='012733', out=out, keyword='智能', max_candidates=2))
+        assert rc == 0
+        with open(out, encoding='utf-8') as f:
+            res = json.load(f)
+        reasons = [r['reason'] for r in res['rejected']]
+        assert any('超过上限' in r for r in reasons), reasons
+        assert any('非被动型' in r for r in reasons), reasons
+        assert res['peer_count'] <= 2
+        assert any('截断' in g for g in res['gaps'])
+    finally:
+        pb.load_fund_list, pb.fetch_tracking_target = orig_list, orig_track
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def main():

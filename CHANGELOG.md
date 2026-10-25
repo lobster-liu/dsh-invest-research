@@ -39,10 +39,58 @@
     对比层铁律中的 `1.38%`、`2.24%`、`43.51亿 vs 120.51亿`、`3.97%`、`≈54%` 全部标注
     **「历史案例 / 示例数据，非通用统计，须按本次实测重算」**。
 
+## 0.5.2 — 2026-10-25
+**上游复核 v0.5.1 后追加修复（P0–P2）+ report-render / xlsx-author 环境准备。**
+**注意：docx 逐页视觉验收与 xlsx 公式重算仍依赖 LibreOffice，本机未装成功，走降级路径并如实标注。**
+
+### 环境准备
+- **已装 Python 依赖**（DSH 自带运行时 site-packages，`python -m pip install -r assets/skills/report-render/scripts/requirements.txt`）：
+  `reportlab 5.1.0` / `matplotlib 3.11.2` / `pypdf 6.21.2` / `pypdfium2 5.14.0` /
+  `fonttools 4.67.0` / `pymupdf 2.0`（`pillow` 原有）。由此 **PDF 直出、图表、矢量/墨量校验、
+  CJK 字形覆盖检查（`check_glyph_coverage`）全部可用**。
+- **LibreOffice：本机未装成功（如实记录，未假装通过）**。docx 排版量测 / xlsx 公式重算校验
+  仍走技能定义的**降级路径**（`未测量 / 未经视觉验收 / recalc_unavailable`），明确**不算通过**。
+  排查记录（供后续复用）：
+  - `winget` 本机不可用（`--version` 空、`search` 退出码 `-1978335231`）；
+  - 用户级 MSI 安装 `msiexec /i ... /qn ALLUSERS=2 MSIINSTALLPERUSER=1` → 退出码 **1603**（安装器
+    custom action 失败，日志见 `Transforming table Error`）；
+  - 无管理员可用 **administrative image `msiexec /a`** 解包，但 `program\bootstrap.ini` 里
+    `InstallMode=<installmode>` 是**未替换占位符**，改成 `InstallMode=1` 后 `soffice.COM --headless`
+    能转换成功、`soffice.exe` 仍弹"配置文件已损坏"——**不保证稳定**。
+  - 结论：**技能只要求 `soffice` 在 PATH 上**，探测用 `shutil.which("soffice")`；装好可用环境后
+    docx/xlsx 校验自然升级为全量，无需改代码。
+- **修 `fin_report/fonts.py`**：字体生成缓存 `CACHE`（默认 `~/.cache/fin_report/fonts`）在
+  DSH 沙箱里不可写时此前直接抛 `PermissionError` 中断渲染。现新增 **可写回退**：
+  逐候选探测（`CACHE` → cwd 下 `.fin_report_fonts`），取第一个真能写的目录；全失败才报错。
+- **修 `fin_report/verify.py`**：`tempfile.TemporaryDirectory` 的清理在 Windows 下会因
+  LibreOffice 写入的 profile ACL 抛 `WinError 5`，导致 docx 排版量测后误报失败。现改为在工作区
+  暂存目录 + **best-effort 清理**（删不掉不致命）。
+
+### 上游复核追加修复（对 v0.5.1 逐项复核 10 项后的补充，非阻断）
+- **① `--track` 不再静默关掉判据 C**（`peer_builder.py build()`）：给 `--track` 时此前只设
+  `anchor_track`、`anchor_name` 留空 → `anchor_stem=''` → "同基金不同份额"剔除**实际失效**。
+  现统一先从全量基金列表按 `--anchor` 解析锚点简称，`--track` 只跳过抓取、不跳过身份解析；
+  解析不到则在 stderr 警告 + `gaps` 显式标注"判据 C 未生效，须 Agent-P1 从 fund.json 补齐"。
+- **② 修正 `anchor.name` 回落文案**：`(由 fund.json 提供)` 与实际行为不符（脚本从不读 fund.json）
+  → 改为 `(未解析，须 Agent-P1 从 fund.json 补齐)`。
+- **③ `--keyword` 增加候选预筛 + 上限**：此前命中几十/上百只时串行逐只 `fetch_tracking_target`
+  （单只 20s 超时）耗时不可控。现**先按被动型预筛**（非被动型直接记入 `rejected`，不进抓取循环），
+  再按 `--max-candidates`（默认 **60**）截断；超限记入 `rejected`（`keyword-cap`）与 `gaps`，
+  提示调高或改用 `--codes`。
+- **④ host 中性 + 源协议 + 文案一致性**：docstring 用法行改 **bash / PowerShell 均可**（去掉
+  "Windows 必须走 pwsh"）；`SEARCH_URL` 改 **`https://`**（保留 `http://` 作回退）；"某ETF 这类基础盘
+  仍须人工核对"改为"**识别不出的份额类别（share_class 为空）一律记为未取得，须人工核对**"，
+  与已修的 `TYPE_TAIL_WORDS` 逻辑一致。
+- **⑤ 命名统一 `$CMP`**：`SKILL.md` / `peer-orchestrator.md` 用 `$CMP`，`peer-red-team.md` 仍用
+  `<对比目录>` → 统一为 `$CMP`，消除角色间路径转述偏差。
+
 ### 测试
-- `tools/test_peer_tools.py` **10 → 14 条**：新增 `test_detect_share_class_type_tail_not_share_class`
-  （ETF/LOF/QDII/指数 回归）、`test_strip_share_class`、`test_normalize_code`、`test_normalize_codes`。
-- 全量：`npm test` 21/21 · `test_gate` 27/27 · `test_fund_tools` 30/30 · `test_peer_tools` 14/14。
+- `tools/test_peer_tools.py` **10 → 14 → 18 条**：`14 条` 随 v0.5.1 交付（`某ETF` 份额 / 短码补零
+  回归），本轮再加 4 项：`test_search_url_is_https`、`test_build_track_still_resolves_anchor_name`、
+  `test_build_track_unresolved_anchor_is_flagged`、`test_build_keyword_prescreens_and_caps`。
+- 全量：`npm test` 21/21 · `test_gate` 27/27 · `test_fund_tools` 30/30 · `test_peer_tools` 18/18 ·
+  `report-render/selftest.py` PDF 半程通过（5 页 PDF 真实生成）；**docx 排版量测 / xlsx 公式重算
+  依赖 LibreOffice，本机未装好，已如实降级为「未测量 / recalc_unavailable」，不假装通过。**
 
 ## 0.5.0 — 2026-10-24
 - **新增 pick-funds 分析师套件（8 个技能，移植自 ZCode 官方插件 pick-funds v0.1.1，DSH 原生版）**：

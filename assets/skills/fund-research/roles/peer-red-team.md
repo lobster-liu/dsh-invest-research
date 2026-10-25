@@ -4,7 +4,7 @@
 
 ## 你只读
 
-`<对比目录>/work/` 下的 4 份角色文件（peer-macro-policy / peer-industry-trend / peer-valuation / peer-performance）。**禁止**读其他角色文件、**禁止**联网、**禁止**引入外部数据。
+`$CMP/work/` 下的 4 份角色文件（peer-macro-policy / peer-industry-trend / peer-valuation / peer-performance）。**禁止**读其他角色文件、**禁止**联网、**禁止**引入外部数据。
 
 ## 你的核心任务（逐条检验）
 
@@ -53,7 +53,7 @@
 角色给的绩效差异是否**小于自身算出的噪声**？
 - 历史案例：绩效角色说"0.1~0.4pp 差异很小"，但它自己算出 A/B 日差年化 **3.97%** ——0.1~0.4pp 小于噪声，**不具统计可辨识性**，不构成排序依据（**数字为示例，须按本次数据重算**）。
 
-## 你的输出（`<对比目录>/work/red-team.md`）
+## 你的输出（`$CMP/work/red-team.md`）
 
 对上面每一条：**站得住 / 站不住 / 证据不足** + 理由 + 引用角色文件的具体位置（第几行 + 原文）。
 

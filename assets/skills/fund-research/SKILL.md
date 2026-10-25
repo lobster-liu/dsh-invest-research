@@ -114,6 +114,10 @@ New-Item -ItemType Directory -Path "$CMP" -Force
 # 2) 同业：同跟踪标的 / 同行业主题 / 同基金公司 / 同份额类别
 & "$PY" "$TOOLS/peer_builder.py" --anchor '<锚点代码>' --codes '<同业代码1,同业代码2>' --out "$CMP/peers.json"
 ```
+三种候选来源（`--codes` / `--keyword` / `--track`）：
+- `--codes`（**首选**，引用分隔代码）：精确、不消耗网络抓取。
+- `--keyword`（名字关键词）：命中量大时**先按被动型预筛、再按 `--max-candidates`（默认 60）截断**，超限会在 `rejected` / `gaps` 里显式标注，**不代表全量命中**；命中再多时改用 `--codes`。
+- `--track`（直接指定锚点跟踪标的）：**只跳过锚点抓取，仍会从全量列表解析锚点简称**，判据 C 正常生效；若锚点不在列表则 `anchor.name` 留空并在 `gaps` 标注，须 Agent-P1 从 `fund.json` 补齐。
 `peer_builder.py` 实际执行 **3 条剔除 + 1 条标记**：①跟踪标的不严格相等 ②非被动型 ③与锚点属同一基金的不同份额（按 `strip_share_class()` 主体名比对）；结构差异（联接 vs 直投）只标记不剔除。**它不做对比判断**（对比判断留给多 agent）。
 
 **⚠️ 脚本不执行、必须 Agent-P1 人工复核的 2 条**：`交易状态`（封闭/暂停申购）与`份额类别一致性`（A 只对 A）。这两项写在 `peers.json` 的 `agent_review_required` 里，Agent-P1 须复核并把结论落到 `$CMP/peer-review.md`。`peers.json` 归脚本所有，**任何角色不得手改**。
@@ -121,13 +125,13 @@ New-Item -ItemType Directory -Path "$CMP" -Force
 筛选通过后每只同业基金跑一遍阶段 1–5 独立成文。
 
 **第二步 · 派发 4 个互相隔离的独立角色 agent**（**必须由协调者亲自 spawn，不得转给无法派生子代理的执行者**）：
-同一批派发 `peer-macro-policy` / `peer-industry-trend` / `peer-valuation` / `peer-performance` 四个独立 agent，各自只读各基金 `fund.json`，各自独立产出 `<对比目录>/work/<role>.md`。**互不共享结论**（防锚定）。
+同一批派发 `peer-macro-policy` / `peer-industry-trend` / `peer-valuation` / `peer-performance` 四个独立 agent，各自只读各基金 `fund.json`，各自独立产出 `$CMP/work/<role>.md`。**互不共享结论**（防锚定）。
 
 **第三步 · 派发独立 red-team**：
 red-team 逐条质疑 4 份对比结论：同源假验证 / 样本冒充全组合 / 口径越界 / 循环论证 / 内部自相矛盾 / 被忽略的反向证据。**建议用不同模型**，异源审查更能证伪。
 
 **第四步 · 协调员裁决**：
-读 `<对比目录>/work/` 下全部 5 份角色文件，按证据质量裁决，产出 `<对比目录>/comparison.md`，最后过门禁。
+读 `$CMP/work/` 下全部 5 份角色文件，按证据质量裁决，产出 `$CMP/comparison.md`，最后过门禁。
 
 **对比层铁律（原则固定；下列数字均为某次实测的示例数据，非通用统计，复用时须按本次数据重算）**：
 1. **披露事实 vs 分析判断必须显式分开**（见 `comparison.md` 第 4 节）。分析判断（如按股票名称手工归集的"某链条≈54%主导"）**不得用于量化裁决**。

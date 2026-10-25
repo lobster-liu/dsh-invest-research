@@ -44,7 +44,7 @@ python assets/skills/fund-research/tools/fetch_fund.py --code 025490 --out /tmp/
 python assets/skills/fund-research/tools/test_fund_tools.py
 # 4) 脱敏门禁行为自检(27 场景,期望 exit 0)
 python assets/skills/stock-research/tools/test_gate.py
-# 5) 对比层工具离线自测(14 条断言,期望 exit 0;含 ETF/联接份额与短码补零回归)
+# 5) 对比层工具离线自测(18 条断言,期望 exit 0;含 ETF/联接份额、短码补零、--track 仍解析锚点名、关键词截断)
 python assets/skills/fund-research/tools/test_peer_tools.py
 # 统一入口:npm test 跑 21 条注册冒烟;npm run test:all 跑全部(21+27+30+14)
 ```
@@ -62,9 +62,9 @@ python assets/skills/fund-research/tools/test_peer_tools.py
 | `assets/skills/fund-research/roles/*.md` ×10 | **(v0.3.0 / v0.4.0)** 协调员 + Agent1–Agent6 + 对比层 3 角色(`peer-orchestrator` / `peer-builder` / `peer-red-team`),统一提交格式 |
 | `assets/skills/fund-research/tools/fetch_fund.py` | **(v0.3.0)** 基金身份/净值/多期持仓/行业配置/债券持仓/规模份额/持有人/资产配置/经理/基准对比/重仓股快照;多通道降级,**空数据退出码 1** |
 | `assets/skills/fund-research/tools/test_fund_tools.py` | **(v0.3.0)** 30 条离线断言(内联 fixture + 网络桩,零网络) |
-| `assets/skills/fund-research/tools/peer_builder.py` | **(v0.5.1)** 同业筛选器:**脚本执行 3 条**(跟踪标的严格相等 / 仅被动型 / 非同一基金不同份额)+ **标记 1 条**(结构差异);**交易状态与份额类别一致性不执行**,写入 `agent_review_required[]` 交 Agent-P1 人工复核,**只筛不评** |
+| `assets/skills/fund-research/tools/peer_builder.py` | **(v0.5.2)** 同业筛选器:**脚本执行 3 条**(跟踪标的严格相等 / 仅被动型 / 非同一基金不同份额)+ **标记 1 条**(结构差异);**交易状态与份额类别一致性不执行**,写入 `agent_review_required[]` 交 Agent-P1 人工复核,**只筛不评**;候选支持 `--codes` / `--keyword`(被动型预筛 + `--max-candidates` 上限)/ `--track`(仍解析锚点简称,不静默关掉判据 C) |
 | `assets/skills/fund-research/tools/comparator.py` | **(v0.4.0)** 对比矩阵生成器:读 `peers.json` + 各基金 `report.md`/`fund.json`,对齐已冻结结论、暴露口径冲突,**不重算指标** |
-| `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.5.1)** 对比层 14 条离线断言(含 `某ETF` 不得判成 F 份额、`11839→011839` 补零两项回归;纯逻辑 + 工作区临时目录 fixture,零网络) |
+| `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.5.2)** 对比层 18 条离线断言(含 `某ETF` 不得判成 F 份额、`11839→011839` 补零、`--track` 不得让判据 C 失效、`--keyword` 预筛+截断四项回归;纯逻辑 + 工作区临时目录 fixture,零网络) |
 | `tools/sanitize_check.py` | 落盘前 PII 门禁:5 类泄漏规则 + 5 层公开信息白名单(财报科目/政策条款/金融术语/**基金公开披露**/否定声明);混合陷阱必拦 |
 | `tools/test_gate.py` | 门禁行为自检 27 场景(真泄漏必拦/公开条款必放/基金披露必放/陷阱必拦) |
 | `tools/run_pipeline.ps1` | Windows PowerShell 引导脚本(ASCII-only,PS 5.1 兼容) |
@@ -107,11 +107,38 @@ python assets/skills/fund-research/tools/test_peer_tools.py
 
 ### 依赖边界
 
-- `report-render` 另需 `reportlab / matplotlib / pypdf / pypdfium2 / pillow / fonttools`
-  （见 `assets/skills/report-render/scripts/requirements.txt`）与系统 CJK 字体；
+- `report-render` 另需 `reportlab / matplotlib / pypdf / pypdfium2 / pillow / fonttools / pymupdf`
+  （见 `assets/skills/report-render/scripts/requirements.txt`；`pymupdf` 为可选项，缺则字形覆盖
+  检查自动跳过）与系统 CJK 字体；
 - `xlsx-author` 需 `openpyxl`，公式重算校验走 headless LibreOffice（缺失时用技能定义的强制
   替代检查并如实标注，不假装通过）；
 - 两者脚本均为纯 Python，随技能原样携带，无平台耦合。
+
+### report-render / xlsx-author 完整度
+本仓库技能**只要求 `soffice` 在 PATH 上**（探测用 `shutil.which("soffice")`）。缺失时
+docx 排版量测 / xlsx 公式重算**如实降级**为"未测量 / 未经视觉验收 / recalc_unavailable"，
+**不假装通过**。
+
+```powershell
+# 1) Python 依赖(dsh 自带 python 或 $PY) —— 已装并验证:
+& "$PY" -m pip install -r assets/skills/report-render/scripts/requirements.txt
+#    reportlab / matplotlib / pypdf / pypdfium2 / pillow / fonttools / pymupdf
+#    → PDF 直出、图表、墨量/空白页校验、CJK 字形覆盖全部可用(无需 LibreOffice)
+
+# 2) LibreOffice(仅 docx 排版量测 + xlsx 公式重算需要)。无管理员时用「管理镜像」解包:
+#    winget 不可用的环境示例 —— 官方 mirror 下载 Win_x86-64 MSI 后:
+#    msiexec /a "LibreOffice_X.Y.Z.msi" /qn TARGETDIR="D:\Users\...\LibreOffice"
+#    !!! 坑:解包后 program\bootstrap.ini 里 InstallMode=<installmode>(未替换占位符)
+#        会报"配置文件已损坏";改成 InstallMode=1 后 soffice.COM 通常可用,soffice.exe 不一定。
+#        若仍报错,请用管理员权限正常安装,不要沿用管理镜像。
+#    然后把 <target>\program 加入用户 PATH。
+
+# 3) 自检:python assets/skills/report-render/scripts/selftest.py <输出目录>
+#    PDF 半程应全过;docx 排版量测有无取决于步骤 2。
+```
+> 本机现状（2026-10-25）：Python 依赖已装齐；LibreOffice 三种安装方式（`winget` / 用户级 MSI /
+> 管理镜像）均未稳定成功，已从用户 PATH 移除，docx/xlsx 校验走降级路径。**这不影响 PDF 交付
+> 与数据正确性，只影响 docx 逐页视觉验收和公式重算校验两项。**
 
 ## Requirements
 - DSH ≥ 0.2.0-rc(skill 注册走 Host `skills` 服务;**无该服务时插件加载为 no-op,不会报错**)

@@ -2046,8 +2046,17 @@ def _docx_layout(report: Report, path: Path, render_dir: str | Path | None,
             "per-page renders for structure only, or install the family before "
             "accepting the layout"
         )
-    with tempfile.TemporaryDirectory(prefix="docx-verify-") as tmp:
-        outdir = target or Path(tmp)
+    # A temp dir that we can actually delete: Windows sandbox denies cleanup
+    # of dirs LibreOffice has written a private profile into.  Use a workspace
+    # scratch area and ignore cleanup failures — the OS will reclaim it.
+    from .fonts import CACHE_FALLBACK
+    verify_root = CACHE_FALLBACK.parent / "docx-verify"
+    verify_root.mkdir(parents=True, exist_ok=True)
+    import uuid
+    tmp = verify_root / f"run-{uuid.uuid4().hex[:8]}"
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        outdir = target or tmp
         outdir.mkdir(parents=True, exist_ok=True)
         try:
             converted = _docx_to_pdf(soffice, path, outdir, timeout)
@@ -2069,6 +2078,13 @@ def _docx_layout(report: Report, path: Path, render_dir: str | Path | None,
         report.rendered = geometry.rendered
         report.failures += geometry.failures
         report.warnings += geometry.warnings
+    finally:
+        # Best-effort cleanup; ignore any ACL-denied deletions (WinError 5).
+        import shutil
+        try:
+            shutil.rmtree(tmp, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def main() -> int:

@@ -1,6 +1,6 @@
 {
   "name": "dsh-invest-research",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Multi-agent equity & fund research skill bundle for DeepSeek Harness — stock-research (6-role A-share pipeline), fund-research (7-role fund look-through pipeline with 10-section reports), and the pick-funds analyst suite (screening, fund/manager profiles, holdings-style, fund watch, PDF/DOCX/XLSX delivery), with source-cited data, multi-channel fetchers, and a shared pre-write PII gate.",
   "license": "MIT",
   "author": "lobster-liu",

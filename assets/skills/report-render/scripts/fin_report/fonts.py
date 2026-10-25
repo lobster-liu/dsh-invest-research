@@ -47,6 +47,36 @@ class FontError(RuntimeError):
     """No CJK-capable TTF could be found or built."""
 
 
+#: Used when ``CACHE`` is not writable — a read-only home, or a harness sandbox that
+#: only permits writes inside the workspace. Only generated font files land here, so
+#: falling back to the working directory is harmless and keeps the skill usable on
+#: machines where ``~/.cache`` is denied.
+CACHE_FALLBACK = Path.cwd() / ".fin_report_fonts"
+
+
+def cache_dir() -> Path:
+    """Return a directory that can actually hold generated font files.
+
+    ``~/.cache`` is the right place on a normal desktop. A sandboxed harness often
+    denies writes outside the workspace, and crashing the whole render over a cache
+    location would be the wrong failure: probe both candidates and use the first one
+    that really accepts a write.
+    """
+    for candidate in (CACHE, CACHE_FALLBACK):
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write-probe"
+            probe.write_bytes(b"")
+            probe.unlink()
+        except OSError:
+            continue
+        return candidate
+    raise FontError(
+        f"no writable font cache directory (tried {CACHE} and {CACHE_FALLBACK}); "
+        "set FIN_REPORT_FONT_CACHE to a writable path"
+    )
+
+
 @dataclass(frozen=True)
 class FontPair:
     regular: Path
@@ -97,10 +127,10 @@ def _find(name: str, roots: list[Path]) -> Path | None:
 
 def _instantiate_static(variable: Path) -> FontPair:
     """Build static Regular and Bold from a variable font (reportlab needs static)."""
-    CACHE.mkdir(parents=True, exist_ok=True)
+    cache = cache_dir()
     out = {}
     for label, weight in (("Regular", 400), ("Bold", 700)):
-        target = CACHE / f"{variable.stem}-{label}.ttf"
+        target = cache / f"{variable.stem}-{label}.ttf"
         if not target.is_file():
             font = _ttfont(str(variable))
             _instancer().instantiateVariableFont(font, {"wght": weight}, inplace=True)
@@ -221,14 +251,14 @@ def _mislabelled(path: Path, expect_bold: bool) -> bool:
 
 def _repair(pair: FontPair) -> FontPair:
     """Return a pair whose metadata matches its weights, caching any repairs."""
-    CACHE.mkdir(parents=True, exist_ok=True)
+    cache = cache_dir()
     fixed = {}
     for label, path, weight in (("Regular", pair.regular, 400), ("Bold", pair.bold, 700)):
         if not _mislabelled(path, expect_bold=(label == "Bold")):
             fixed[label] = path
             continue
         stat = path.stat()
-        target = CACHE / f"{path.stem}-fixed-{label}-{stat.st_size}-{int(stat.st_mtime)}.ttf"
+        target = cache / f"{path.stem}-fixed-{label}-{stat.st_size}-{int(stat.st_mtime)}.ttf"
         if not target.is_file():
             font = _ttfont(str(path))
             _retag(font, label, weight)

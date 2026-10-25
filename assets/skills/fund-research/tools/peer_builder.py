@@ -22,11 +22,11 @@ peer_builder.py —— fund-research 同业构建器（阶段 6 对比层第一�
 
 ⚠️ 已知局限
   · share_class 由简称末位字母推断，是**启发式**而非披露字段；
-    类型/联接缩写（ETF / LOF / FOF / QDII / 联接）结尾已排除，不会被误判成份额类别，
-    但 "某ETF" 这类基础盘仍须人工核对（见 detect_share_class / strip_share_class）。
+    类型/联接缩写（ETF / LOF / FOF / QDII / 联接）结尾已排除，不会被误判成份额类别。
+    识别不出的份额类别（share_class 为空）一律记为「未取得，须人工核对」。
   · 结构化字段 comparability 只表达"脚本能证明的前提"，不表达"可对比谁更优"。
 
-用法（Windows，必须走 pwsh 调 python；--codes 一律加引号，脚本内 zfill(6) 兜底）：
+用法（bash / PowerShell 均可；--codes 一律加引号，脚本内 zfill(6) 兜底）：
   & $PY peer_builder.py --anchor 012733 --keyword 人工智能 --out peers.json
   & $PY peer_builder.py --anchor 012733 --codes '011839,023461' --out peers.json
   & $PY peer_builder.py --anchor 012733 --codes '011839,023461' --track 中证人工智能主题指数 --out peers.json
@@ -47,7 +47,9 @@ except Exception:
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36')
 
-SEARCH_URL = 'http://fund.eastmoney.com/js/fundcode_search.js'
+SEARCH_URL = 'https://fund.eastmoney.com/js/fundcode_search.js'
+# 东财该地址同时支持 http/https；个别网络只放行 http，故保留回退。
+SEARCH_URL_FALLBACK = 'http://fund.eastmoney.com/js/fundcode_search.js'
 # 搜索列表字段：代码 / 拼音 / 简称 / 类型 / 全称拼音
 SEARCH_KEYS = ('fund_code', 'pinyin_abbr', 'fund_name', 'fund_type', 'pinyin_full')
 
@@ -79,9 +81,16 @@ def http_get(url, timeout=30):
 def load_fund_list():
     """全量基金列表（约 2.8 万只）。返回 [{fund_code,fund_name,fund_type,...}]。"""
     raw = http_get(SEARCH_URL)
-    m = re.search(r'\[\s*\[.*?\]\s*\]', raw, re.S)
-    if not m:
-        raise RuntimeError('fundcode_search.js 解析失败')
+    try:
+        m = re.search(r'\[\s*\[.*?\]\s*\]', raw, re.S)
+        if not m:
+            raise RuntimeError('fundcode_search.js 解析失败')
+    except Exception:
+        # https 被中间设备拦截时回退 http（同一路径，仅协议不同）
+        raw = http_get(SEARCH_URL_FALLBACK)
+        m = re.search(r'\[\s*\[.*?\]\s*\]', raw, re.S)
+        if not m:
+            raise RuntimeError('fundcode_search.js 解析失败')
     arr = json.loads(m.group(0))
     out = []
     for row in arr:
@@ -209,17 +218,23 @@ def build(args):
     if anchor_code != (args.anchor or '').strip():
         padded.append(f'{args.anchor}→{anchor_code}')
 
-    # 第一步：锚点跟踪标的
-    anchor_name = ''
+    # 全量基金列表只取一次：锚点名解析、候选集合都依赖它。
+    fund_list = load_fund_list()
+    by_code = {f['fund_code']: f for f in fund_list}
+
+    # 第一步：锚点跟踪标的。
+    # ⚠️ --track 只跳过"抓取跟踪标的"，不等于跳过身份解析：锚点简称仍须从全量
+    # 列表解析，否则 anchor_stem 为空、判据 C（同基金不同份额剔除）会静默失效。
+    anchor = by_code.get(anchor_code)
+    anchor_name = anchor['fund_name'] if anchor else ''
+    anchor_name_unresolved = not anchor_name
     if args.track:
         anchor_track = args.track
-        print(f'[锚点] 使用用户指定的跟踪标的: {anchor_track}')
+        print(f'[锚点] {anchor_code} {anchor_name} 使用用户指定的跟踪标的: {anchor_track}')
+        if anchor_name_unresolved:
+            print('[警告] 锚点不在全量基金列表中，无法解析简称 → 判据 C 失效，'
+                  '须 Agent-P1 从 fund.json 补齐锚点名', file=sys.stderr)
     else:
-        # 从基金列表找锚点名
-        fund_list = load_fund_list()
-        anchor = next((f for f in fund_list if f['fund_code'] == anchor_code), None)
-        if anchor:
-            anchor_name = anchor['fund_name']
         anchor_track = fetch_tracking_target(anchor_code)
         if not anchor_track:
             print('错误: 锚点跟踪标的无法确认，无法判定同业。', file=sys.stderr)
@@ -227,8 +242,9 @@ def build(args):
         print(f'[锚点] {anchor_code} {anchor_name} 跟踪标的: {anchor_track}')
 
     # 第二步：候选集合（名称/类型一律从全量列表查，不依赖用户输入）
-    fund_list = load_fund_list()
-    by_code = {f['fund_code']: f for f in fund_list}
+    pre_rejected = []
+    dropped = 0
+    capped = False
     if args.codes:
         codes = normalize_codes(args.codes)
         for raw in (args.codes or '').split(','):
@@ -246,20 +262,38 @@ def build(args):
         source = 'user-list'
     else:
         kw = args.keyword or ''
-        if kw:
-            candidates = [f for f in fund_list if kw in f['fund_name']]
-            source = f'keyword:{kw}'
-        else:
+        if not kw:
             print('错误: 需 --codes 或 --keyword 指定候选范围', file=sys.stderr)
             return 1
-        print(f'[候选] {source} → {len(candidates)} 只')
+        hits = [f for f in fund_list if kw in f['fund_name']]
+        # 预筛：只有被动型才值得逐只抓主页；非被动型按判据 B 直接记为拒绝，
+        # 不浪费一次串行抓取（keyword 命中量大时这是主要耗时来源）。
+        candidates = [f for f in hits if is_passive(f['fund_type'])]
+        for f in hits:
+            if not is_passive(f['fund_type']):
+                pre_rejected.append({
+                    'code': f['fund_code'], 'name': f['fund_name'],
+                    'type': f['fund_type'],
+                    'reason': f'非被动型({f["fund_type"]})，不构成同标的同业'})
+        cap = args.max_candidates
+        if len(candidates) > cap:
+            dropped = len(candidates) - cap
+            candidates = candidates[:cap]
+            capped = True
+            pre_rejected.append({
+                'code': '-', 'name': '-', 'type': 'keyword-cap',
+                'reason': f'关键词命中被动型候选超过上限 {cap}，已截断（丢弃 {dropped} 只）；'
+                          '调高 --max-candidates 或改用 --codes'})
+        source = f'keyword:{kw}'
+        print(f'[候选] {source} → 命中 {len(hits)} 只，其中被动型 {len(candidates)} 只待抓取'
+              + (f'（上限 {cap} 已截断，丢弃 {dropped} 只）' if capped else ''))
 
     if padded:
         print(f'[代码归一] 已补前导零: {", ".join(padded)}')
 
     # 第三步：逐只核对
     peers = []
-    rejected = []
+    rejected = list(pre_rejected)
     anchor_stem = strip_share_class(anchor_name)
     anchor_struct = detect_structure(anchor_name) if anchor_name else ''
     anchor_share = detect_share_class(anchor_name, anchor_code) if anchor_name else ''
@@ -330,12 +364,24 @@ def build(args):
     # 第四步：输出
     anchor_info = {
         'code': anchor_code,
-        'name': anchor_name or '(由 fund.json 提供)',
+        'name': anchor_name or '(未解析，须 Agent-P1 从 fund.json 补齐)',
         'tracking_target': anchor_track,
         'share_class': anchor_share,
         'structure': anchor_struct,
         'share_stem': anchor_stem,
     }
+    gaps = [
+        '交易状态/规模/经理任期/费率/跟踪误差需由 fetch_fund.py 逐只补齐',
+        '交易状态与份额类别分组未被本脚本校验，属 Agent-P1 人工复核项',
+    ]
+    if anchor_name_unresolved:
+        gaps.append(
+            f'锚点 {anchor_code} 的简称未能从全量基金列表解析，判据 C（同基金不同份额）'
+            '未生效；须 Agent-P1 从 fund.json 补齐锚点名后重新核对')
+    if capped:
+        gaps.append(f'关键词候选超过上限 {args.max_candidates}，已截断 {dropped} 只；'
+                    '截断后的集合不代表全部命中')
+
     result = {
         'anchor': anchor_info,
         'anchor_tracking_target': anchor_track,
@@ -363,10 +409,7 @@ def build(args):
         'rejected': rejected,
         'peer_count': len(peers),
         'rejected_count': len(rejected),
-        'gaps': [
-            '交易状态/规模/经理任期/费率/跟踪误差需由 fetch_fund.py 逐只补齐',
-            '交易状态与份额类别分组未被本脚本校验，属 Agent-P1 人工复核项',
-        ],
+        'gaps': gaps,
     }
 
     with open(args.out, 'w', encoding='utf-8') as f:
@@ -394,6 +437,9 @@ def main():
     ap.add_argument('--codes', default='',
                     help='逗号分隔的候选同业代码，必须加引号；给此则不用 keyword')
     ap.add_argument('--keyword', default='', help='名字关键词，自动搜索候选（如 "人工智能"）')
+    ap.add_argument('--max-candidates', type=int, default=60,
+                    help='--keyword 路径下最多抓取多少只被动型候选（默认 60，'
+                         '防止命中量大时串行抓取耗时失控）')
     ap.add_argument('--track', default='', help='可选，直接指定锚点跟踪标的，跳过锚点抓取')
     args = ap.parse_args()
     return build(args)
