@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.2 — 2026-10-29
+**修正 `decision-loop` 技能里的工具路径（文档修正，无代码变更）。**
+
+`decision-loop` 的 `SKILL.md` 写着 `$TOOLS = $BASE/tools`，但该技能目录**只有** `SKILL.md` 与
+`roles/`，四个脚本实际与 `fund-research` 共用（`assets/skills/fund-research/tools/`）。
+照文档执行会去一个不存在的位置找 `decision_log.py` / `settle.py` / `decision_score.py`。
+→ 改为 `$TOOLS = $BASE/../fund-research/tools`，并把「本 skill 不自带 tools 目录、不要去找
+`$BASE/tools`」写清楚；正文里残留的 `tools/rating.py` 一并对齐为 `$TOOLS/rating.py`。
+
+> 同类路径在另外两处本来就是对的，可作对照：`fund-research` 用自己的 `$BASE/tools`；
+> `stock-research` 用 `$SHARED = $BASE/../fund-research/tools`。
+
+### 测试
+无断言变更（纯文档）。全量仍为：`npm test` 29/29 · `test_gate` 27/27 ·
+`test_fund_tools` 38/38 · `test_peer_tools` 24/24 · `test_decision_tools` 64/64。
+
 ## 0.6.1 — 2026-10-29
 **修复阻断级缺陷：插件在真实 Host 上**一个技能都没注册**（`active` 但技能列表为空）。**
 

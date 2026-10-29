@@ -21,17 +21,20 @@ description: 决策闭环流水线。把每次研究的结论写成结构化决�
 - **不评基金、不给买卖建议**。它只回答「当时的结论，后来兑现了吗」。
 
 ## 环境解析
-- `$BASE`   —— 本 skill 的 base 目录（DSH 加载 skill 时会在提示中给出）
-- `$TOOLS`  = `$BASE/tools`（`decision_log.py` / `settle.py` / `decision_score.py` / `rating.py`；
-  **产物绝不写入插件目录**）
-- `$SHARED` = `$BASE/../fund-research/tools`（共用 `rating.py` 词表与 `settle.py`/`decision_score.py`）
+- `$BASE`   —— 本 skill 的 base 目录（DSH 加载 skill 时会在提示中给出）：
+  `.../assets/skills/decision-loop/`，其中**只有** `SKILL.md` 与 `roles/`。
+- `$TOOLS`  = `$BASE/../fund-research/tools`
+  —— **本 skill 不自带 tools 目录**，四个脚本与 `fund-research` 共用同一份，
+  不要去找 `$BASE/tools`（那里没有）：
+  `decision_log.py` / `settle.py` / `decision_score.py` / `rating.py`。
+  （`rating.py` 是结论标签词表的唯一权威来源；两个 skill 读的是同一个文件。）
 - `$PY`     —— Python 解释器：环境变量 `EQUITY_PY` → DSH 内置运行时 → PATH 中的 `python`
 - `$LOG`    —— 决策日志目录：`<用户当前工作区>\invest-decisions\`
   （`ledger.jsonl` 只增追加；未配置则本 skill 降级为「不写日志」，并在输出中如实说明）
 - `$RUN`    —— 本次运行输出目录：`<用户当前工作区>\decision-runs\<yyyymmdd-HHmmss>\`
 
 ## 核心原则（不可违反）
-1. **标签只有一个词表**：`tools/rating.py` 定义 5 档结论标签
+1. **标签只有一个词表**：`$TOOLS/rating.py` 定义 5 档结论标签
    （`优先研究` / `可以关注` / `等待验证` / `暂不优先` / `数据不足`）。
    **任何角色不得自行硬编码标签集合**，避免词表漂移。
 2. **解析不出就是 `REVIEW`，不是「等待验证」**。一个读不懂的决策不是中性决策，
