@@ -14,12 +14,16 @@ description: 多智能体协同的 A 股行情分析流水线。6 角色（协�
 
 ## 环境解析（执行任何命令前先做一次，全程复用）
 - `$BASE`   —— 本 skill 的 base 目录（DSH 加载 skill 时会在提示中给出）
-- `$TOOLS`  = `$BASE/tools`（fetch_data.py / fetch_fundamentals.py / sanitize_check.py / run_pipeline.ps1 均在此，**产物绝不写入插件目录**）
+- `$TOOLS`  = `$BASE/tools`（fetch_data.py / fetch_fundamentals.py / sanitize_check.py / pit.py / run_pipeline.ps1 均在此，**产物绝不写入插件目录**）
+- `$SHARED` = `$BASE/../fund-research/tools`（共用 `rating.py` 标签词表、`decision_log.py`、`decision_score.py`）
 - `$PY`     —— Python 解释器，按优先级：
   1. 环境变量 `EQUITY_PY`；
   2. DSH 自带运行时 `%DSH_HOME%\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe`（Windows，有 numpy/pandas）；
   3. PATH 中的 `python`。
+- `$ASOF`   —— **分析基准日** `YYYY-MM-DD`（默认执行当日，带时区）。全程唯一，禁止中途改。
+  取数时作为 `--as-of` 传给取数脚本；所有角色据此判断「该数据当时是否已公开」。
 - `$RUN`    —— 本次运行输出目录：`<用户当前工作区>\equity-runs\<标的>-<yyyyMMdd-HHmmss>\`
+- `$LOG`    —— 决策日志目录：`<用户当前工作区>\invest-decisions\`（`ledger.jsonl` 只增追加）
 - `$ARCHIVE`—— 可选归档根（如 Obsidian 库）；**未配置则跳过归档步骤，只保留 `$RUN`**。
   若配置了 git 同步的笔记库：报告虽经脱敏，写入仍会扩散到该库的所有同步端——
   **用户未明确要求写入其个人笔记库之前，不得归档**。
@@ -33,6 +37,20 @@ description: 多智能体协同的 A 股行情分析流水线。6 角色（协�
 6. **单一数据源锁定**：一次运行只认本次 `$RUN/data.json`；任何角色不得改读其他 run、`smoke*`、`_` 开头目录（2026-10-15 真实事故教训，详 `roles/auditor.md` G 项）。
 7. **口径并列披露**：盘中 vs 收盘、累计 vs 单月、合并 vs 归母等同一指标多口径时，**必须并列披露并声明所用口径**，禁止只挑一个。
 8. **结尾必须声明**：仅供研究参考，不构成投资建议。
+9. **必须声明分析基准日**：一次运行只认一个「分析基准日」（默认执行当日，带时区，如 `2026-10-29 15:04 +08:00`），
+   写进 `report.md` 首屏与 `data.json`。**所有行情/财务/估值/政策结论都必须满足「该数据在基准日已公开」**。
+10. **所有序列一律按基准日截断**：取数脚本用 `--as-of <YYYY-MM-DD>`，历史行情只取 `日期 ≤ 基准日` 的部分；
+    **基准日之后的行情、财报、公告一律不得进入任何计算窗口**（含分位、回撤、收益、跟踪误差）。
+11. **披露日期与数据日期必须分列**：每条「披露事实」必须同时给出 `数据日期`（统计截止）与
+    `披露日期`（该值首次公开可被读取之日）。取不到披露日期记「未取得」并降级为「计算结果」，
+    **不得以数据日期充当披露日期**——重述正是靠这个字段暴露的。
+12. **取原始披露版本，不取最新版本**：从披露页补数据时必须选「基准日当天已公开」的那一版定期报告
+    （判断依据是**公告日期**而非报告期）；存在更正公告/追溯调整时取基准日前最后一版并注明。
+    **不得使用基准日之后发布的报告或更正版本。**
+13. **结论必须落盘为可解析的决策标签**：结论标签只能取
+    `优先研究` / `可以关注` / `等待验证` / `暂不优先` / `数据不足` 之一
+    （词表唯一定义在 `$SHARED/rating.py`）；解析不出写 `REVIEW`，**不得**静默抹平成中性标签。
+    裁决后必须写 `$RUN/decision.json` 并追加进决策日志（见 `decision-loop` skill）。
 
 ## 角色文件（派发子代理时，读取对应文件作为其完整提示词）
 ```
@@ -50,11 +68,12 @@ roles/auditor.md       审计员：只读核对 A-G 七类，PASS/FAIL+问题清
 $runid = '<标的>-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 $RUN = (Get-Location).Path + "\equity-runs\$runid"
 New-Item -ItemType Directory -Path $RUN -Force
+$ASOF = (Get-Date -Format 'yyyy-MM-dd')   # 分析基准日；用户指定历史基准日时改用该值
 ```
 
 ### 2. 阶段一：数据员 + 政策员（**并行派发**）
-- 数据员：读 `roles/data.md`。先调取数器：
-  `& "$PY" "$TOOLS/fetch_data.py" --code <代码> --out "$RUN/data.json" --history-days 1300`
+- 数据员：读 `roles/data.md`。先调取数器（**必须带 `--as-of $ASOF`**）：
+  `& "$PY" "$TOOLS/fetch_data.py" --code <代码> --out "$RUN/data.json" --history-days 1300 --as-of $ASOF`
   （**退出码 1 = 全通道失败，禁止带空数据继续**；财务科目缺失按 data.md 的 read.fetch 指引补，见环境限制节）
   **若已装 akshare**，紧接着取基本面（可选增强，退出码 1 不阻断主流程）：
   `& "$PY" "$TOOLS/fetch_fundamentals.py" --code <代码> --out "$RUN/fundamentals.json"`
@@ -75,6 +94,7 @@ New-Item -ItemType Directory -Path $RUN -Force
 
 ### 7. 阶段六：协调员汇总
 读 `roles/orchestrator.md`，按固定 8 章节生成 `report.md`（一句话结论/核心数据/政策时间轴/周期判断/打分表/建仓计划/风险证伪/数据缺口）。
+第 5 章「标的打分表」**必须同时给出加权总分与结论标签**（映射表见 `roles/valuation.md`）。
 
 ### 8. 阶段七：门禁 + 可选归档（**门禁不可绕过**）
 ```powershell
@@ -82,6 +102,16 @@ New-Item -ItemType Directory -Path $RUN -Force
 ```
 - 退出码 0 → 若 `$ARCHIVE` 已配置，将 `report.md/valuation.md/risk.md/audit*.md/policy.md/data.json`（不含 `_` 开头文件）复制到 `$ARCHIVE\<标的>-<名称>-<日期>\`；
 - 非 0 → 退回重写，**不得绕过、不得删规则放行**。
+
+### 9. 阶段八：登记决策（**可追溯的闭环**）
+门禁通过后，协调员把结论写成 `$RUN/decision.json` 并追加进决策日志：
+```powershell
+& "$PY" "$SHARED/decision_log.py" append --ledger "$LOG\ledger.jsonl" --record "$RUN\decision.json"
+```
+- `decision.json` 字段见 `decision-loop` skill（`run_id`/`code`/`as_of`/`label`/`label_conditions`/`label_horizon`/`vocabulary_version` 等）；
+- `as_of` 必须等于本次 `$ASOF`；`label` 必须是 5 档标签之一或 `REVIEW`；
+- **写日志失败不中止研究**，但必须在报告「数据缺口」中写明「决策日志未写入：<原因>」；
+- 日志只存公开结论，**不含任何个人头寸**（门禁已覆盖）。
 
 ## 模型分配（成本优化）
 | 角色 | 档位 | 理由 |

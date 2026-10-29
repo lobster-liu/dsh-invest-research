@@ -33,6 +33,15 @@ try:
 except Exception:
     pass
 
+# 时点纪律底座（与 fund-research 共用；本目录为两 skill 的共享工具目录）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from pit import AsOf, build_as_of, parse_date
+except Exception:  # pragma: no cover - 底座缺失时降级为「不截断」，不阻断取数
+    AsOf = None
+    build_as_of = None
+    parse_date = None
+
 # 陈旧阈值：行情 1 交易日，月度 45 天
 STALE_QUOTE_DAYS = 3      # 1 交易日 + 周末容差
 STALE_MONTHLY_DAYS = 45
@@ -59,6 +68,36 @@ def _rec(metric, value, unit, caliber, source, data_date, stale=None, note=''):
         'stale': stale,
         '备注': note,
     }
+
+
+def _rec_pit(metric, value, unit, caliber, source, data_date, asof=None,
+             disclose_type=None, note='', stale=None):
+    """构造一条带**披露日期**的标准记录（时点纪律版）。
+
+    与 `_rec` 的区别：
+      1. 多出 `披露日期` 字段 —— 公众首次可读之日；取不到写「未取得」，
+         绝不用数据日期冒充（重述就靠这个字段暴露）。
+      2. 披露日期晚于基准日的记录，强制 `stale=true` 并在备注注明「基准日后披露」——
+         `stale` 原本只说明「标签有多旧」，不说明「内容在基准日是否可见」，
+         这里补上后视维度。
+    """
+    rec = _rec(metric, value, unit, caliber, source, data_date, stale=stale, note=note)
+    if asof is None or not getattr(asof, 'is_set', False):
+        rec['披露日期'] = '未取得'
+        return rec
+
+    from pit import disclosure_date
+    disclosed = disclosure_date(data_date, disclose_type)
+    rec['披露日期'] = disclosed
+    visible = asof.visible(data_date, disclose_type)
+    if not visible:
+        rec['stale'] = True
+        extra = '；基准日后披露，基准日不可见'
+        rec['备注'] = (rec['备注'] + extra) if rec['备注'] else extra.lstrip('；')
+    if disclosed != '未取得':
+        tag = '；披露日期 %s（推算）' % disclosed
+        rec['备注'] = (rec['备注'] + tag) if rec['备注'] else tag.lstrip('；')
+    return rec
 
 
 def _calc_stale(data_date, caliber):
@@ -129,13 +168,22 @@ def fetch_quote_akshare(code):
     return out
 
 
-def fetch_history_akshare(code, days=800):
-    """历史行情，用于估值分位与回撤测算。返回 (records, dataframe_or_None)。"""
+def fetch_history_akshare(code, days=800, asof=None):
+    """历史行情，用于估值分位与回撤测算。返回 (records, dataframe_or_None)。
+
+    时点纪律：给定 `asof` 时，窗口终点是**基准日**而不是当下；
+    取回后再按日期二次截断（akshare 的 end_date 过滤对缺失交易日不总是可靠）。
+    """
     import akshare as ak
-    end = datetime.now().strftime('%Y%m%d')
-    start = (datetime.now() - timedelta(days=int(days * 1.6))).strftime('%Y%m%d')
+    anchor = getattr(asof, 'as_of', None) or datetime.now().date()
+    end = anchor.strftime('%Y%m%d')
+    start = (anchor - timedelta(days=int(days * 1.6))).strftime('%Y%m%d')
     df = ak.stock_zh_a_hist(symbol=code, period='daily',
                             start_date=start, end_date=end, adjust='qfq')
+    if df is None or df.empty:
+        return [], None
+    # 二次截断：确保不会有任何一行晚于基准日
+    df, dropped = _truncate_df(df, asof)
     if df is None or df.empty:
         return [], None
     last = df.iloc[-1]
@@ -151,6 +199,10 @@ def fetch_history_akshare(code, days=800):
         _rec('区间最低价', float(df['最低'].min()), '元', '区间',
              'akshare.stock_zh_a_hist', str(last['日期'])[:10]),
     ]
+    if dropped:
+        out.append(_rec('基准日后剔除行数', dropped, '行', '区间',
+                        'pit:truncate', str(last['日期'])[:10],
+                        note=f'晚于基准日 {getattr(asof, "iso", "")} 的行情行已剔除'))
     return out, df
 
 
@@ -201,12 +253,18 @@ def fetch_quote_http(code):
     return out
 
 
-def fetch_history_http(code, days=800):
-    """东方财富 K 线兜底。返回 (records, dataframe_or_None)。"""
+def fetch_history_http(code, days=800, asof=None):
+    """东方财富 K 线兜底。返回 (records, dataframe_or_None)。
+
+    时点纪律：给定 `asof` 时，K 线请求的 end 参数是基准日（而非 20500101 这个
+    写死的远期值），并在本地按日期二次截断。
+    """
     market = '1' if code[:1] in ('6', '9') else '0'
+    anchor = getattr(asof, 'as_of', None) or datetime.now().date()
+    end_param = anchor.strftime('%Y%m%d')
     url = ('https://push2his.eastmoney.com/api/qt/stock/kline/get'
            f'?secid={market}.{code}&klt=101&fqt=1'
-           f'&lmt={int(days)}&end=20500101'
+           f'&lmt={int(days)}&end={end_param}'
            '&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56')
     d = _http_json(url).get('data') or {}
     klines = d.get('klines') or []
@@ -223,6 +281,10 @@ def fetch_history_http(code, days=800):
             '最低': float(parts[4]),
             '成交量': float(parts[5]),
         })
+    # 按基准日二次截断（接口的 end 参数对缺失交易日不总是可靠）
+    rows, dropped_rows = _truncate_rows(rows, asof)
+    if not rows:
+        return [], None
     try:
         import pandas as pd
         df = pd.DataFrame(rows)
@@ -236,6 +298,10 @@ def fetch_history_http(code, days=800):
         _rec('区间最高价', max(r['最高'] for r in rows), '元', '区间', 'eastmoney.http', last['日期']),
         _rec('区间最低价', min(r['最低'] for r in rows), '元', '区间', 'eastmoney.http', last['日期']),
     ]
+    if dropped_rows:
+        out.append(_rec('基准日后剔除行数', dropped_rows, '行', '区间',
+                        'pit:truncate', last['日期'],
+                        note=f'晚于基准日 {getattr(asof, "iso", "")} 的行情行已剔除'))
     return out, df
 
 
@@ -290,6 +356,42 @@ def _find_col(df, prefer, alternatives):
 
 
 # ---------------------------------------------------------------------------
+# 时点截断辅助
+# ---------------------------------------------------------------------------
+
+def _truncate_rows(rows, asof):
+    """按基准日截断 dict 行列表。返回 (保留的行, 剔除的行数)。"""
+    if asof is None or not getattr(asof, 'is_set', False):
+        return rows, 0
+    anchor = asof.as_of
+    kept, dropped = [], 0
+    for row in rows:
+        d = parse_date(row.get('日期')) if parse_date else None
+        if d is None or d <= anchor:
+            kept.append(row)
+        else:
+            dropped += 1
+    return kept, dropped
+
+
+def _truncate_df(df, asof):
+    """按基准日截断 DataFrame。返回 (保留的 df, 剔除的行数)。"""
+    if asof is None or not getattr(asof, 'is_set', False):
+        return df, 0
+    anchor = asof.as_of
+    keep_idx, dropped = [], 0
+    for idx, row in df.iterrows():
+        d = parse_date(row.get('日期')) if parse_date else None
+        if d is None or d <= anchor:
+            keep_idx.append(idx)
+        else:
+            dropped += 1
+    if dropped and keep_idx:
+        df = df.loc[keep_idx]
+    return df, dropped
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -298,9 +400,16 @@ def main():
     ap.add_argument('--code', required=True, help='A股代码，如 600000')
     ap.add_argument('--out', required=True, help='输出 JSON 路径')
     ap.add_argument('--history-days', type=int, default=800)
+    ap.add_argument('--as-of', dest='as_of', default=None,
+                    help='分析基准日 YYYY-MM-DD：历史序列一律截断到该日，'
+                         '基准日之后的行情不得进入任何计算窗口（时点纪律）')
     args = ap.parse_args()
 
     code = args.code.strip()
+    asof = build_as_of(args.as_of) if build_as_of else None
+    if args.as_of and (asof is None or not asof.is_set):
+        print('[WARN] --as-of 格式无法解析（需 YYYY-MM-DD），本次不做时点截断。',
+              file=sys.stderr)
     channels = []
     quote, hist = [], None
     hist_records = []
@@ -313,7 +422,7 @@ def main():
             quote = []
             channels.append(f'akshare:quote:FAILED({type(e).__name__})')
         try:
-            hist_records, hist = fetch_history_akshare(code, args.history_days)
+            hist_records, hist = fetch_history_akshare(code, args.history_days, asof)
             channels.append('akshare:history')
         except Exception as e:
             hist_records, hist = [], None
@@ -327,7 +436,7 @@ def main():
             channels.append(f'http:quote:FAILED({type(e).__name__})')
     if hist is None:
         try:
-            hist_records, hist = fetch_history_http(code, args.history_days)
+            hist_records, hist = fetch_history_http(code, args.history_days, asof)
             channels.append('http:history(fallback)')
         except Exception as e:
             channels.append(f'http:history:FAILED({type(e).__name__})')
@@ -337,10 +446,13 @@ def main():
     if hist is not None and len(hist) > 0:
         pct = compute_percentile(hist)
         if pct is not None:
+            note = f'基于 {len(hist)} 个交易日收盘价'
+            if asof is not None and asof.is_set:
+                note += f'；样本区间终点 {str(hist.iloc[-1]["日期"])[:10]}（基准日 {asof.iso}）'
             derived.append(_rec('价格历史分位', pct, '%', '区间',
                                 'derived:compute_percentile',
                                 str(hist.iloc[-1]['日期'])[:10],
-                                note=f'基于 {len(hist)} 个交易日收盘价'))
+                                note=note))
         mdd = compute_max_drawdown(hist)
         if mdd:
             derived.append(_rec('最大回撤', mdd['最大回撤'], '比率', '区间',
@@ -353,6 +465,9 @@ def main():
     payload = {
         '标的': code,
         '取数时间': _now(),
+        '分析基准日': (asof.iso if asof is not None and asof.is_set
+                       else datetime.now().strftime('%Y-%m-%d')),
+        '时点截断': bool(asof is not None and asof.is_set),
         '通道': channels,
         '记录数': len(records),
         '空值数': sum(1 for r in records if r['值'] is None),

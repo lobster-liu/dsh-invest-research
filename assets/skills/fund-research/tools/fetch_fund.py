@@ -43,7 +43,7 @@ except Exception:
 
 _PLUGIN_PKG_NAME = 'dsh-invest-research'
 # 单独拷走运行、又找不到本插件 package.json 时的回落值（与 package.json 同步）。
-_VERSION_FALLBACK = '0.5.7'
+_VERSION_FALLBACK = '0.6.0'
 
 
 def _resolve_version(start=None):
@@ -74,6 +74,19 @@ def _resolve_version(start=None):
 
 VERSION = _resolve_version()
 TRADING_DAYS = 244
+
+# 时点纪律底座（与 stock-research 共用：../../stock-research/tools/pit.py）
+_SHARED_TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             '..', '..', 'stock-research', 'tools')
+if _SHARED_TOOLS not in sys.path:
+    sys.path.insert(0, _SHARED_TOOLS)
+try:
+    import pit as _pit
+    build_as_of = _pit.build_as_of
+    pit_disclosure_date = _pit.disclosure_date
+except Exception:  # pragma: no cover - 底座缺失时降级为「不截断」，不阻断取数
+    build_as_of = None
+    pit_disclosure_date = None
 
 # 陈旧阈值（日历日）
 STALE_NAV_DAYS = 5
@@ -151,7 +164,11 @@ def _days_between(d1, d2):
 
 def _rec(metric, value, unit, caliber, source, data_date, stale=None, note='',
          kind='披露事实'):
-    """构造一条标准记录。stale 为 None 时按数据日期 + 口径自动判定。"""
+    """构造一条标准记录。stale 为 None 时按数据日期 + 口径自动判定。
+
+    时点纪律：记录一律带 `披露日期`（公众首次可读之日），取不到写「未取得」，
+    **不得用数据日期冒充**——重述正是靠这个字段暴露的。
+    """
     if stale is None:
         stale = _calc_stale(data_date, caliber)
     return {
@@ -161,11 +178,37 @@ def _rec(metric, value, unit, caliber, source, data_date, stale=None, note='',
         '口径': caliber,
         '来源': source,
         '数据日期': data_date,
+        '披露日期': '未取得',
         '取数时间': _now(),
         'stale': stale,
         '类型': kind,
         '备注': note,
     }
+
+
+def _rec_pit(metric, value, unit, caliber, source, data_date, asof=None,
+             disclose_type=None, stale=None, note='', kind='披露事实'):
+    """构造一条带**披露日期**且做过可见性判定的记录。
+
+    - `披露日期` 由「数据日期 + 披露类型」推算（保守上界：监管最晚披露时限）；
+      推算值在备注里标明「推算」，不得当作实际披露日期。
+    - 披露日期晚于基准日的记录：强制 `stale=true`，备注注明「基准日后披露」。
+      `stale` 原本只说明「标签有多旧」，不说明「内容在基准日是否可见」。
+    """
+    rec = _rec(metric, value, unit, caliber, source, data_date,
+               stale=stale, note=note, kind=kind)
+    if asof is None or not getattr(asof, 'is_set', False):
+        return rec
+    disclosed = pit_disclosure_date(data_date, disclose_type)
+    rec['披露日期'] = disclosed
+    if not asof.visible(data_date, disclose_type):
+        rec['stale'] = True
+        extra = '；基准日后披露，基准日不可见'
+        rec['备注'] = (rec['备注'] + extra) if rec['备注'] else extra.lstrip('；')
+    if disclosed != '未取得':
+        tag = '；披露日期 %s（推算）' % disclosed
+        rec['备注'] = (rec['备注'] + tag) if rec['备注'] else tag.lstrip('；')
+    return rec
 
 
 def _calc_stale(data_date, caliber):
@@ -850,6 +893,7 @@ def infer_share_class(name):
 
 def build_payload(args):
     code = args.code.strip()
+    asof = getattr(args, 'asof', None)
     channels = []
     pz = fetch_pingzhongdata(code, channels)
     page = fetch_fundpage(code, channels)
@@ -875,6 +919,15 @@ def build_payload(args):
     # --history-days 默认 0 = 保留全部历史（否则「成立以来」指标其实只是样本区间）
     if args.history_days and len(nav_series) > args.history_days:
         nav_series = nav_series[-args.history_days:]
+
+    # -- 时点纪律：净值序列一律截断到分析基准日 ------------------
+    # 基准日之后才发布的净值不得进入任何计算窗口（净值分位/区间收益/回撤都基于它）。
+    nav_dropped = 0
+    if asof is not None and asof.is_set and nav_series:
+        kept, nav_dropped = asof.truncate(nav_series, date_key=0)
+        nav_series = kept
+    # ------------------------------------------------------------
+
     inception = page.get('inception')
     # 注意：`or 999` 会把 0（净值首日 == 成立日，正是我们要的正确情况）判成 falsy，
     # 于是「成立以来」被错标成「样本区间」。必须显式判 None。
@@ -1002,16 +1055,51 @@ def build_payload(args):
         ('基金主页最新披露%s' % ('，报告期推断' if report_period and not (
             latest or {}).get('报告期') and not page.get('holdings_date_hint') else ''))
         if stocks else None)
+
+    # -- 时点纪律：报告期晚于基准日的持仓不得进入事实底稿 --------------
+    # f10 归档给的是「当前可见的最新一期」，不是「基准日当时已公开的一期」。
+    # 若不判定，基准日 6 月的报告可能引用 10 月才披露的三季报持仓。
+    holdings_visible = True
+    holdings_visibility_note = ''
+    if asof is not None and asof.is_set and report_period:
+        # 披露类型映射到滞后规则：季报前十大 / 全量披露(半年报/年报)
+        lag_type = '半年报' if '全量' in str(disclose_type) else '季报'
+        holdings_visible = asof.visible(report_period, lag_type)
+        if not holdings_visible:
+            holdings_visibility_note = (
+                '报告期 %s 预计最早公开日 %s，晚于分析基准日 %s —— 该期持仓不得使用，'
+                '应改用上一期并在数据缺口写明「最新一期尚未公开」' % (
+                    report_period,
+                    pit_disclosure_date(report_period, lag_type) if pit_disclosure_date else '未取得',
+                    asof.iso))
+            # 退回上一期（若存在）
+            visible_periods = [p for p in periods
+                               if asof.visible(p.get('报告期'),
+                                               '半年报' if '全量' in str(p.get('披露类型')) else '季报')]
+            if visible_periods:
+                fallback = visible_periods[0]
+                report_period = fallback.get('报告期')
+                disclose_type = fallback.get('披露类型') or disclose_type
+                stocks = fallback.get('股票') or []
+                holdings_visibility_note += '；已退回使用上一期报告期 %s' % report_period
+            else:
+                stocks = []
+                holdings_visibility_note += '；无可见的历史报告期，持仓明细置空'
+    # ------------------------------------------------------------------
+
     stock_total = None
     stock_total_date = None
     for date_, alloc in sorted((pz.get('asset_alloc') or {}).items()):
         if alloc.get('股票占净比') is not None:
             stock_total, stock_total_date = alloc['股票占净比'], date_
     for s in stocks:
-        records.append(_rec('持仓:%s' % (s.get('名称') or s.get('代码')), s.get('占净值比%'),
-                            '%', '披露时点', SRC_F10 if holding_source == 'f10归档' else SRC_PAGE,
-                            report_period or last_nav_date, note='%s；%s；报告期 %s' % (
-                                holding_source, disclose_type, report_period or '未取得')))
+        records.append(_rec_pit('持仓:%s' % (s.get('名称') or s.get('代码')), s.get('占净值比%'),
+                                '%', '披露时点', SRC_F10 if holding_source == 'f10归档' else SRC_PAGE,
+                                report_period or last_nav_date, asof=asof,
+                                disclose_type=('半年报' if '全量' in str(disclose_type) else '季报'),
+                                note='%s；%s；报告期 %s%s' % (
+                                    holding_source, disclose_type, report_period or '未取得',
+                                    ('；' + holdings_visibility_note) if holdings_visibility_note else '')))
 
     if stocks:
         records.append(_rec('已披露股票合计占净值比', round(known_weight, 4), '%', '披露时点',
@@ -1082,10 +1170,22 @@ def build_payload(args):
             records.append(_rec('最大回撤:近1年', round(mdd1['最大回撤'] * 100, 4), '%', '区间',
                                 SRC_CALC, mdd1['回撤谷底日期'], kind='计算结果', note=nav_caliber))
         pct = _percentile(nav_series)
+        # 净值分位的样本窗口终点必须写出来：窗口终点若不披露，
+        # 「基准日」与「最新可得净值日」的差异就不可见（分位口径也就无法复核）。
+        nav_window_note = '样本窗口 %s → %s（%d 个净值点）' % (
+            nav_series[0][0] if nav_series else '-',
+            last_nav_date or '-', len(nav_series))
+        if asof is not None and asof.is_set:
+            lag = _days_between(last_nav_date, asof.iso) if last_nav_date else None
+            nav_window_note += '；分析基准日 %s' % asof.iso
+            if lag:
+                nav_window_note += ('；基准日净值已披露' if lag <= 0 else
+                                    '；基准日净值未披露，最新可得净值日滞后 %d 天' % lag)
         records.append(_rec('净值分位:%s' % SINCE, pct, '%', '区间', SRC_CALC, last_nav_date,
                             kind='计算结果',
                             note='严格小于当前净值的样本占比（与 stock-research 的 '
-                                 'compute_percentile 同口径）；≠估值分位%s' % note_since))
+                                 'compute_percentile 同口径）；≠估值分位%s；%s'
+                                 % (note_since, nav_window_note)))
         if args.rf is not None and ann1 is not None and vol:
             sharpe = (ann1 * 100 - args.rf) / (vol * 100)
             records.append(_rec('夏普比率:近1年', round(sharpe, 4), '比率', '区间', SRC_CALC,
@@ -1221,8 +1321,10 @@ def build_payload(args):
         '工具版本': VERSION,
         '标的': code,
         '基金名称': fund_name,
-        '分析基准日': _today(),
+        '分析基准日': (asof.iso if asof is not None and asof.is_set else _today()),
         '基准日时区': 'Asia/Shanghai (东八区)',
+        '时点截断': bool(asof is not None and asof.is_set),
+        '基准日后剔除净值点数': nav_dropped,
         '取数时间': _now(),
         '通道': channels,
         '记录数': len(records),
@@ -1265,7 +1367,13 @@ def build_payload(args):
             '指数定制指数（中证/国证 9xxxxx）历史行情在可达通道中取不到，'
             '如需跟踪误差请并列披露基金公司披露值',
             '本 JSON 为唯一事实源：所有角色必须引用同一份文件与同一分析基准日',
-        ],
+        ] + ([
+            '时点纪律：已按分析基准日 %s 截断序列，基准日后剔除净值点 %d 个；'
+            '披露日期为「报告期 + 监管最晚披露时限」的推算上界，实际披露通常更早，'
+            '推算值不得当作实际披露日期' % (asof.iso, nav_dropped),
+            '报告期 %s 的持仓若在基准日尚未公开，已退回上一可见报告期或置空，'
+            '调用方须在「数据缺口」写明' % (report_period or '未取得'),
+        ] if asof is not None and asof.is_set else []),
         '免责': '仅供研究参考，不构成投资建议；全程只读公开数据。',
     }
     return payload
@@ -1286,11 +1394,23 @@ def main():
     ap.add_argument('--benchmark', default=None, help='基准：sh000300 或 "沪深300"')
     ap.add_argument('--rf', type=float, default=None, help='无风险利率假设（%%/年）；给了才计算夏普')
     ap.add_argument('--topline', type=int, default=100, help='f10 持仓条数上限')
+    ap.add_argument('--as-of', dest='as_of', default=None,
+                    help='分析基准日 YYYY-MM-DD：净值/指数/个股序列一律截断到该日，'
+                         '且报告期晚于基准日的持仓不得进入事实底稿（时点纪律）')
     args = ap.parse_args()
 
     if not re.match(r'^\d{6}$', args.code.strip()):
         print('[usage] --code 必须是 6 位数字基金代码', file=sys.stderr)
         return 2
+
+    if args.as_of and build_as_of is not None:
+        asof = build_as_of(args.as_of)
+        if not asof.is_set:
+            print('[WARN] --as-of 格式无法解析（需 YYYY-MM-DD），本次不做时点截断。',
+                  file=sys.stderr)
+    else:
+        asof = None
+    args.asof = asof
 
     payload = build_payload(args)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

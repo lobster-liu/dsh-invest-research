@@ -162,9 +162,28 @@ def test_extract_report_tags():
 
 
 def test_extract_report_tags_empty():
+    """空报告：结论标签必须是 REVIEW 哨兵，而不是空串。
+
+    旧实现对整篇报告做子串扫描，解析失败时静默返回 '' —— 读不懂的决策
+    被当成「没有标签」，等于伪造了一个中性结论。REVIEW 把它显式标出来。
+    """
     tag = cp.extract_report_tags('')
-    assert tag['conclusion_label'] == ''
+    assert tag['conclusion_label'] == cp.REVIEW
     assert tag['schedule_decl'] == ''
+
+
+def test_extract_report_tags_ignores_mentioned_label():
+    """正文里提到某个标签，但本次结论没写 -> 不得把它当成结论标签。
+
+    旧实现是 `if l in md` 全文档子串扫描，会把讨论到的他人结论
+    当成本次结论（tuple 顺序靠前的标签还会抢先命中）。
+    """
+    md = ('## 结论先行\n> **结论标签：等待验证**\n\n'
+          '对比表提到：另一只基金可以关注。\n')
+    assert cp.extract_report_tags(md)['conclusion_label'] == '等待验证'
+
+    md_no_verdict = ('## 对比\n012733 可以关注，011839 暂不优先。\n')
+    assert cp.extract_report_tags(md_no_verdict)['conclusion_label'] == cp.REVIEW
 
 
 def test_build_matrix():

@@ -17,12 +17,15 @@ description: 多智能体协同的基金穿透式研究流水线。7 角色（�
 ## 环境解析（执行任何命令前先做一次，全程复用）
 - `$BASE`   —— 本 skill 的 base 目录（DSH 加载 skill 时会在提示中给出）
 - `$TOOLS`  = `$BASE/tools`（`fetch_fund.py` / `peer_builder.py` / `comparator.py` / `test_fund_tools.py`；**产物绝不写入插件目录**）
-- `$SHARED` = `$BASE/../stock-research/tools`（共用 `sanitize_check.py` 门禁、`fetch_fundamentals.py` 个股财务、`fetch_data.py` 个股行情）
+- `$SHARED` = `$BASE/../stock-research/tools`（共用 `sanitize_check.py` 门禁、`fetch_fundamentals.py` 个股财务、`fetch_data.py` 个股行情、`pit.py` 时点底座）
 - `$PY`     —— Python 解释器，按优先级：
   1. 环境变量 `EQUITY_PY`；
   2. DSH 自带运行时 `%DSH_HOME%\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe`（Windows，含 numpy/pandas）；
   3. PATH 中的 `python`。
+- `$ASOF`   —— **分析基准日** `YYYY-MM-DD`（默认执行当日，带时区）。全程唯一，禁止中途改。
+  取数时作为 `--as-of` 传给取数脚本；所有角色据此判断「该数据当时是否已公开」。
 - `$RUN`    —— 本次运行输出目录：`<用户当前工作区>\fund-runs\<代码>-<yyyyMMdd-HHmmss>\`
+- `$LOG`    —— 决策日志目录：`<用户当前工作区>\invest-decisions\`（`ledger.jsonl` 只增追加）
 - `$ARCHIVE`—— 可选归档根；**未配置则跳过归档**。用户未明确要求写入其个人笔记库之前，不得归档。
 - **分析基准日**：默认执行当日（明确时区，如 `2026-10-17 00:32 +08:00`），全部角色共用同一基准日；
   净值/持仓/财报各自标注「数据日期」与「披露日期」，二者不可混为一谈。
@@ -40,6 +43,16 @@ description: 多智能体协同的基金穿透式研究流水线。7 角色（�
 10. **个人头寸零落盘**：用户若给出持仓成本、组合占比、资金量，只在会话内用于「已持有/未持有、期限、风险承受」的判断，**绝不写入任何落盘文件**（门禁强制拦截，无绕过开关）。因此本 skill **不给个性化仓位比例**，只给条件式观察条件。
 11. **真实调度声明**：具备子代理调度能力时执行真并行，并在报告开头注明「已由 N 个子代理独立产出」；不具备时必须在报告开头声明「以下为单模型按多角色分工分析」，**不得声称进行了独立多 Agent 验证**。**对比层同样适用**：跨基金对比（`peer_builder.py` / `comparator.py`）也必须由具备 spawn 能力的协调者**亲自派发互相隔离的独立角色 agent**（宏观/行业/估值/绩效各一，互不共享结论防锚定），再由独立 red-team 逐条质疑，最后协调员裁决。**不得把对比层交给无法派生子代理的执行者，否则会退化为单模型自证**——此时必须如实声明，不得声称真实多智能体。
 12. **结尾必须声明**：仅供研究参考，不构成投资建议；不接入任何交易通道，全程只读公开数据。
+13. **时点纪律**：所有净值/指数/个股序列一律按**分析基准日截断**
+    （取数时传 `--as-of $ASOF`），**基准日之后发布的净值、行情、报告一律不得进入任何计算窗口**；
+    报告期晚于基准日（或其最早公开日晚于基准日）的持仓**不得使用**，须退回上一可见期并在「数据缺口」写明。
+14. **披露日期与数据日期必须分列**：每条「披露事实」必须同时给出 `数据日期`（统计截止）与
+    `披露日期`（该值首次公开可被读取之日）。取不到披露日期记「未取得」，
+    **不得以数据日期充当披露日期**（重述正是靠这个字段暴露的）。
+15. **结论标签必须可解析、必须落盘**：标签词表唯一定义在 `$TOOLS/rating.py`
+    （`优先研究` / `可以关注` / `等待验证` / `暂不优先` / `数据不足`），
+    **任何角色不得自行硬编码另一套标签**；解析不出写 `REVIEW`，**不得**静默抹平成中性标签。
+    裁决后必须写 `$RUN/decision.json` 并追加进决策日志（见 `decision-loop` skill）。
 
 ## 角色文件（派发子代理时，读取对应文件作为其完整提示词）
 ```
@@ -80,9 +93,12 @@ Agent1 读 `roles/fund-profile.md`，先取数：
 $runid = '<代码>-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 $RUN = (Get-Location).Path + "\fund-runs\$runid"
 New-Item -ItemType Directory -Path $RUN -Force
-& "$PY" "$TOOLS/fetch_fund.py" --code <代码> --out "$RUN/fund.json" --peer-stocks 10
+$ASOF = (Get-Date -Format 'yyyy-MM-dd')   # 分析基准日
+& "$PY" "$TOOLS/fetch_fund.py" --code <代码> --out "$RUN/fund.json" --peer-stocks 10 --as-of $ASOF
 ```
 （**退出码 1 = 全通道取数失败，禁止带空数据继续**；可选 `--benchmark sh000300` 指定基准指数；`--rf 1.5` 才计算夏普比率，未给则该指标为 `未取得`。）
+**`--as-of` 不可省**：它把净值序列截断到基准日，并把「基准日尚未公开」的持仓期挡在事实底稿之外。
+需要更完整的持仓或行业配置时（`fundf10` 通道间歇可达），由 Agent1 用 `web_call` 的 `read.fetch` 补抓，并把补到的数据**合并进同一份 `fund.json`**（标注来源），不得另建第二个事实源。
 需要更完整的持仓或行业配置时（`fundf10` 通道间歇可达），由 Agent1 用 `web_call` 的 `read.fetch` 补抓，并把补到的数据**合并进同一份 `fund.json`**（标注来源），不得另建第二个事实源。
 底稿冻结后，阶段 3 的四路 Agent **只能读 `$RUN/fund.json` 与 Agent1 的底稿摘要**，不得各自另找一套数据。
 
@@ -98,8 +114,19 @@ Agent6 读 `roles/red-team.md`，审查全部角色产物 + `fund.json`，产出
 ### 阶段 5：裁决与汇总
 协调员读 `roles/orchestrator.md`，按第五节固定 10 章节成文 `$RUN/report.md`；结论标签只能取：
 **优先研究 / 可以关注 / 等待验证 / 暂不优先 / 数据不足**（并说明条件）。不得只写「长期看好，短期震荡」。
+词表唯一定义在 `$TOOLS/rating.py`；**不得自行另立一套标签**。
 无可靠估值与组合模型时，**不输出精确收益率、目标净值或虚构概率**，只给方向与敏感因素。
 保留无法消除的分歧，不按多数投票统一口径。
+
+裁决完成后，协调员把结论写成 `$RUN/decision.json` 并**追加**进决策日志（只增写入）：
+```powershell
+& "$PY" "$TOOLS/decision_log.py" append --ledger "$LOG\ledger.jsonl" --record "$RUN\decision.json"
+```
+- 字段：`run_id` / `code` / `as_of`（= `$ASOF`）/ `label` / `label_conditions` /
+  `label_horizon` / `confidence` / `benchmark` / `report_path` / `vocabulary_version`；
+- `label` 写不出时写 `REVIEW`，**不得**省略该字段；
+- **写日志失败不中止研究**，但必须在「数据缺口」写明「决策日志未写入：<原因>」；
+- 日志只存公开结论，**不含任何个人头寸**。详见 `decision-loop` skill。
 
 ### 阶段 6：对比层（跨基金同业对比，可选）
 

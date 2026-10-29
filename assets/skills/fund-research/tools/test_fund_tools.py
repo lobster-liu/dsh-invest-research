@@ -191,15 +191,21 @@ check('VERSION 已对齐当前插件版本（不再滞后 0.3.0）',
       (ff.VERSION, ff._VERSION_FALLBACK))
 
 
-def _pkg_version(start=None):
+def _pkg_version(start=None, stop_at=None):
     """插件版本真值：向上找 `.qoder-plugin/plugin.json` →
     带 `assets/` 标记的 `name=='dsh-invest-research'` package.json；都没有返回 None。
 
     **跨安装形态可跑**：Qoder 等把 `skills/fund-research/tools` 独立安装时，
     上面没有仓库根 package.json，不能写死 `HERE/../../../..`。返回 None 时
     对应断言跳过（不影响运行时代码）。`start` 仅用于测试注入。
+
+    `stop_at`：向上查找的**边界目录**（含）。走到它就停，不再往上。
+    测试用它把「无清单」夹具与真实的插件树隔开 —— 否则夹具放在插件目录内时，
+    向上走几步就会撞上插件自己的 package.json，「无清单」根本构造不出来
+    （该断言此前在插件根目录下运行必失败，与被测代码无关）。
     """
     here = start or HERE
+    boundary = os.path.abspath(stop_at) if stop_at else None
     for _ in range(6):
         # Qoder 插件根标记：.qoder-plugin/plugin.json
         qp = os.path.join(here, '.qoder-plugin', 'plugin.json')
@@ -224,6 +230,8 @@ def _pkg_version(start=None):
                             return v
                 except Exception:
                     pass
+        if boundary and os.path.abspath(here) == boundary:
+            break
         parent = os.path.dirname(here)
         if parent == here:
             break
@@ -284,10 +292,13 @@ try:
     check('_pkg_version 认 Qoder 布局的 .qoder-plugin/plugin.json',
           got3 == '6.6.6', got3)
     # _pkg_version 找不到任何清单时返回 None（断言可跳过，不炸）
+    # 边界设成夹具根：夹具若放在插件目录内，向上走会撞上插件自己的
+    # package.json，「无清单」就构造不出来（此前该断言在插件根目录下必失败）。
     _nm = os.path.join(_vtmp, 'nomanifest')
     os.makedirs(_nm)
     check('_pkg_version 无清单时返回 None（跨安装形态可跑）',
-          _pkg_version(start=_nm) is None, _pkg_version(start=_nm))
+          _pkg_version(start=_nm, stop_at=_nm) is None,
+          _pkg_version(start=_nm, stop_at=_nm))
 finally:
     shutil.rmtree(_vtmp, ignore_errors=True)
 

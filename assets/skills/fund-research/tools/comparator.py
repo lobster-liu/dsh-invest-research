@@ -28,8 +28,20 @@ try:
 except Exception:
     pass
 
-# 结论标签合法集（取自 fund-research 铁律）
-LABELS = ('优先研究', '可以关注', '等待验证', '暂不优先', '数据不足')
+# 结论标签词表与解析器（唯一权威来源，stock-research 与 fund-research 共用）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from rating import LABELS, REVIEW, DIRECTIONAL_LABELS, parse_label, is_review
+except Exception:  # pragma: no cover - 词表缺失时降级为不可解析，不静默取中性标签
+    LABELS = ('优先研究', '可以关注', '等待验证', '暂不优先', '数据不足')
+    REVIEW = 'REVIEW'
+    DIRECTIONAL_LABELS = ('优先研究', '可以关注', '暂不优先')
+
+    def parse_label(md):
+        return REVIEW
+
+    def is_review(signal):
+        return signal == REVIEW
 
 # 对比维度（每个维度一行结论，标注来源与是否同口径）
 DIMENSIONS = (
@@ -64,12 +76,15 @@ def _read_md(path):
 
 
 def extract_report_tags(md):
-    """从 report.md 提取：结论标签、调度声明、口径缺陷、未取得项。"""
-    label = ''
-    for l in LABELS:
-        if l in md:
-            label = l
-            break
+    """从 report.md 提取：结论标签、调度声明、口径缺陷、未取得项。
+
+    结论标签用共用的 `rating.parse_label` 解析：锚定到「结论标签：xxx」，
+    容忍 Markdown 加粗与全角标点；解析不出返回 REVIEW 哨兵。
+    旧实现是对整篇报告做 `if l in md` 子串扫描，会把正文里随口提到的
+    标签当成结论（例如对比表里出现「可以关注」就抢先命中），且解析失败
+    时静默返回空串——读不懂的决策被当成没有标签，等于伪造了一个中性结论。
+    """
+    label = parse_label(md)
     # 调度声明
     decl = ''
     m = re.search(r'调度声明[^\n]*\n(.{0,300})', md)
@@ -121,7 +136,10 @@ def build_matrix(base_dir):
              fj.get('业绩比较基准') or '')
         if t:
             tracks.add(str(t)[:40])
-    labels = {e['label'] for e in entries if e['label']}
+    labels = {e['label'] for e in entries if e['label'] and e['label'] != REVIEW}
+    # REVIEW 单独统计：解析不出来的报告是**流程故障**，不是研究分歧，
+    # 混进「结论标签分化」会把基础设施问题误报成结论矛盾。
+    review_codes = [e['code'] for e in entries if e['label'] == REVIEW]
 
     return {
         'anchor': anchor,
@@ -129,6 +147,7 @@ def build_matrix(base_dir):
         'entries': entries,
         'distinct_tracks': list(tracks),
         'distinct_labels': list(labels),
+        'review_codes': review_codes,
     }
 
 
@@ -145,6 +164,10 @@ def render_md(matrix):
     if len(matrix['distinct_tracks']) > 1:
         lines.append('> ⚠️ **跟踪标的不一致**——以下基金不构成严格同业，对比结论需打折扣。')
     lines.append(f"- 各基金独立流程给出的结论标签集合：{matrix['distinct_labels']}")
+    if matrix.get('review_codes'):
+        lines.append(f"- ⚠️ **结论标签不可解析（REVIEW）**：{matrix['review_codes']}"
+                     " —— 这是流程故障（报告未按「结论标签：xxx」格式落盘），"
+                     "不是结论分歧；须退回该基金补齐后重新对比。")
     lines.append('')
 
     # 调度声明一致性
@@ -164,7 +187,6 @@ def render_md(matrix):
     for e in matrix['entries']:
         lines.append(f"| {e['code']} | {e['label'] or '未标注'} | {', '.join(e['caveats']) or '无'} |")
     lines.append('')
-
     # 对比维度矩阵
     lines.append('## 十维度对比矩阵\n')
     lines.append('| 维度 | 说明 | 对比结论 |')
@@ -189,6 +211,9 @@ def render_md(matrix):
         conflict_found = True
     if len(matrix['distinct_labels']) > 1:
         lines.append(f'- **结论标签分化**：{matrix["distinct_labels"]}（需协调员裁决是否矛盾）')
+    if matrix.get('review_codes'):
+        lines.append(f'- **结论标签不可解析**：{matrix["review_codes"]}'
+                     '（流程故障，须补齐后重比；不得当作「等待验证」）')
     for e in matrix['entries']:
         if e['caveats']:
             lines.append(f"- {e['code']} 检出口径线索：{', '.join(e['caveats'])}")

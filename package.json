@@ -1,7 +1,7 @@
 {
   "name": "dsh-invest-research",
-  "version": "0.5.7",
-  "description": "Multi-agent equity & fund research skill bundle for DeepSeek Harness — stock-research (6-role A-share pipeline), fund-research (7-role fund look-through pipeline with 10-section reports), and the pick-funds analyst suite (screening, fund/manager profiles, holdings-style, fund watch, PDF/DOCX/XLSX delivery), with source-cited data, multi-channel fetchers, and a shared pre-write PII gate.",
+  "version": "0.6.0",
+  "description": "Multi-agent equity & fund research skill bundle for DeepSeek Harness — stock-research (6-role A-share pipeline), fund-research (7-role fund look-through pipeline with 10-section reports), the pick-funds analyst suite (screening, fund/manager profiles, holdings-style, fund watch, PDF/DOCX/XLSX delivery), and decision-loop (point-in-time as-of discipline, a single conclusion-label vocabulary with a REVIEW sentinel, an append-only decision ledger, settlement against realised returns, and decision-quality scoring), with source-cited data, multi-channel fetchers, and a shared pre-write PII gate.",
   "license": "MIT",
   "author": "lobster-liu",
   "homepage": "https://github.com/lobster-liu/dsh-invest-research#readme",
@@ -30,7 +30,7 @@
   },
   "scripts": {
     "test": "node test/smoke.mjs",
-    "test:python": "python assets/skills/stock-research/tools/test_gate.py && python assets/skills/fund-research/tools/test_fund_tools.py && python assets/skills/fund-research/tools/test_peer_tools.py",
+    "test:python": "python assets/skills/stock-research/tools/test_gate.py && python assets/skills/fund-research/tools/test_fund_tools.py && python assets/skills/fund-research/tools/test_peer_tools.py && python assets/skills/fund-research/tools/test_decision_tools.py",
     "test:all": "npm run test && npm run test:python"
   },
   "keywords": [
@@ -53,7 +53,10 @@
     "holdings-style",
     "manager-profile",
     "report-render",
-    "xlsx-author"
+    "xlsx-author",
+    "decision-loop",
+    "point-in-time",
+    "backtest"
   ],
   "dsh": {
     "bundle": {

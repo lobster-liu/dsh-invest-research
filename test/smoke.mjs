@@ -1,6 +1,6 @@
 /**
  * smoke.mjs — 不依赖 DSH 宿主,模拟 Cordis ctx 验证插件的 skill 注册逻辑:
- *   T1 正常宿主: 10 个 skill 都注册上, list()/get() 各自独立, rank/source 正确
+ *   T1 正常宿主: 11 个 skill 都注册上, list()/get() 各自独立, rank/source 正确
  *   T2 无 skills 服务: apply() 不抛错, 静默降级
  *   T3 其中一个 SKILL.md 损坏: 其余照常注册, 坏的那个只 warn
  *   T4 parseSkillFile 边界 + 目录解析
@@ -52,23 +52,24 @@ const { registerSkillsWhenAvailable, registerSkillWhenAvailable, createSkillProv
         readSkill, parseSkillFile, SKILL_DIRS, providerNameFor } =
   await import(pathToFileURL(resolve(ROOT, 'lib/skill.js')).href);
 
-// ---- T1 正常宿主：全部 10 个技能都注册 ----
+// ---- T1 正常宿主：全部 11 个技能都注册 ----
 {
   const { ctx, registered } = makeCtx();
   const h = registerSkillsWhenAvailable(ctx, SKILL_DIRS);
-  ok('T1 all skills registered', h.isAvailable() && registered.length === 10);
-  ok('T1 available() lists 10 dirs', h.available().length === 10);
+  ok('T1 all skills registered', h.isAvailable() && registered.length === 11);
+  ok('T1 available() lists 11 dirs', h.available().length === 11);
 
   const providers = registered.map((f) => f());
   const all = [];
   for (const p of providers) all.push(...(await p.list()));
   const names = all.map((s) => s.name).sort();
   const expected = [
-    'fund-profile', 'fund-research', 'fund-screen', 'fund-watch', 'holdings-style',
-    'manager-profile', 'pick-funds', 'report-render', 'stock-research', 'xlsx-author',
+    'decision-loop', 'fund-profile', 'fund-research', 'fund-screen', 'fund-watch',
+    'holdings-style', 'manager-profile', 'pick-funds', 'report-render',
+    'stock-research', 'xlsx-author',
   ].sort();
-  ok('T1 list has the 10 bundled skills',
-     names.length === 10 && names.every((n, i) => n === expected[i]));
+  ok('T1 list has the 11 bundled skills',
+     names.length === 11 && names.every((n, i) => n === expected[i]));
   ok('T1 rank=600 source=bundled for all',
      all.every((s) => s.rank === 600 && s.source === 'bundled'));
   ok('T1 provider is the plugin name for all skills',
@@ -133,7 +134,7 @@ const { registerSkillsWhenAvailable, registerSkillWhenAvailable, createSkillProv
 {
   const r = parseSkillFile('---\nname: a\n---\nbody with ```powershell block```');
   ok('T4 parse keeps body', r.name === 'a' && r.body.includes('powershell'));
-  ok('T4 SKILL_DIRS has 10 entries', SKILL_DIRS.length === 10
+  ok('T4 SKILL_DIRS has 11 entries', SKILL_DIRS.length === 11
      && SKILL_DIRS.every((d) => d.endsWith('/')));
   ok('T4 providerNameFor returns the plugin name',
      providerNameFor('/x/stock-research/') === 'dsh-invest-research');
