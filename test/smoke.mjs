@@ -26,18 +26,33 @@ const ok = (name, cond) => {
   cond ? pass++ : fail++;
 };
 
-function makeCtx({ withSkills = true } = {}) {
+function makeCtx({ withSkills = true, rejectNames = [] } = {}) {
   const effects = [];
   const warns = [];
   const registered = [];
+  const names = new Set();
   const ctx = {
     inject(deps, cb) {
       if (deps.includes('skills') && !withSkills) return; // Host 无该服务 -> 回调不执行
       cb({
         skills: {
+          // 真实 Host 的行为：同一层内 provider 名重复（或命中保留名）会 **throw**。
+          // 旧 mock 无条件收下，于是「11 个 provider 共用一个名字」这种必炸的写法
+          // 也能全绿 —— 线上表现是第一个注册成功、其余抛出、inject fiber 被销毁并
+          // 连带注销已注册的 provider，插件显示 active 却一个技能都没有。
           registerProvider(factory) {
+            const provider = factory({ signal: undefined, invalidate() {} });
+            const name = provider?.name;
+            if (!name) throw new Error('provider has no name');
+            if (rejectNames.includes(name)) throw new Error(`reserved provider name: ${name}`);
+            if (names.has(name)) throw new Error(`duplicate provider name: ${name}`);
+            names.add(name);
             registered.push(factory);
-            return () => registered.shift();
+            return () => {
+              names.delete(name);
+              const at = registered.indexOf(factory);
+              if (at >= 0) registered.splice(at, 1);
+            };
           },
         },
         logger: () => ({ warn: (m) => warns.push(String(m)) }),
@@ -45,11 +60,11 @@ function makeCtx({ withSkills = true } = {}) {
       });
     },
   };
-  return { ctx, registered, warns, effects };
+  return { ctx, registered, warns, effects, names };
 }
 
 const { registerSkillsWhenAvailable, registerSkillWhenAvailable, createSkillProvider,
-        readSkill, parseSkillFile, SKILL_DIRS, providerNameFor } =
+        readSkill, parseSkillFile, SKILL_DIRS, providerNameFor, skillIdFromDir, PLUGIN_NAME } =
   await import(pathToFileURL(resolve(ROOT, 'lib/skill.js')).href);
 
 // ---- T1 正常宿主：全部 11 个技能都注册 ----
@@ -72,8 +87,13 @@ const { registerSkillsWhenAvailable, registerSkillWhenAvailable, createSkillProv
      names.length === 11 && names.every((n, i) => n === expected[i]));
   ok('T1 rank=600 source=bundled for all',
      all.every((s) => s.rank === 600 && s.source === 'bundled'));
-  ok('T1 provider is the plugin name for all skills',
-     all.every((s) => s.provider === 'dsh-invest-research'));
+  // provider 名必须**逐个唯一**：Host 对同层重名直接 throw（见 makeCtx 注释）。
+  ok('T1 provider names are unique per skill',
+     new Set(all.map((s) => s.provider)).size === all.length);
+  ok('T1 provider name is namespaced by the plugin name',
+     all.every((s) => s.provider.startsWith(PLUGIN_NAME + ':')));
+  ok('T1 provider name carries the skill id',
+     all.every((s) => s.provider === PLUGIN_NAME + ':' + s.name));
 
   // The real Host calls get(candidate) with the Candidate object it kept from
   // list() (dsh-skill/lib/index.js: `match.provider.get(match.candidate, options)`).
@@ -136,11 +156,30 @@ const { registerSkillsWhenAvailable, registerSkillWhenAvailable, createSkillProv
   ok('T4 parse keeps body', r.name === 'a' && r.body.includes('powershell'));
   ok('T4 SKILL_DIRS has 11 entries', SKILL_DIRS.length === 11
      && SKILL_DIRS.every((d) => d.endsWith('/')));
-  ok('T4 providerNameFor returns the plugin name',
-     providerNameFor('/x/stock-research/') === 'dsh-invest-research');
+  ok('T4 providerNameFor 带技能 id（逐个唯一）',
+     providerNameFor('/x/assets/skills/stock-research/') === PLUGIN_NAME + ':stock-research');
+  ok('T4 providerNameFor 接受反斜杠路径',
+     providerNameFor('C:\\x\\assets\\skills\\fund-research\\') === PLUGIN_NAME + ':fund-research');
+  ok('T4 skillIdFromDir 取末段',
+     skillIdFromDir('/a/b/skills/decision-loop/') === 'decision-loop');
   const fund = readSkill(FUND_DIR);
   ok('T4 fund-research description loaded', fund.description.length > 30
      && fund.description.includes('基金'));
+}
+
+// ---- T5 注册健壮性：单个 provider 被 Host 拒绝，其余照常注册 ----
+{
+  // 只拒绝 decision-loop 的名字，模拟 Host 对该名 throw（保留名/重名等）。
+  const rejected = PLUGIN_NAME + ':decision-loop';
+  const { ctx, registered, warns } = makeCtx({ rejectNames: [rejected] });
+  const h = registerSkillsWhenAvailable(ctx, SKILL_DIRS);
+  ok('T5 被拒绝的那个技能不影响其余 10 个', h.isAvailable() && registered.length === 10);
+  ok('T5 被拒绝时只 warn 不崩', warns.length === 1 && warns[0].includes('decision-loop'));
+  const providers = registered.map((f) => f());
+  ok('T5 被拒绝的技能确实不在结果里',
+     !providers.some((p) => p.name === rejected));
+  ok('T5 其余技能仍然可取到 body',
+     !!(await providers[0].get((await providers[0].list())[0])));
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

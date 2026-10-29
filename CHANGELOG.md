@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.6.1 — 2026-10-29
+**修复阻断级缺陷：插件在真实 Host 上**一个技能都没注册**（`active` 但技能列表为空）。**
+
+### 根因
+Host 的 `skills.registerProvider()` 对**同层内重名的 provider 直接 throw**
+（"Duplicate names within one layer and reserved names throw"）。
+本插件 `providerNameFor()` 此前让**全部 11 个 provider 共用同一个名字** `dsh-invest-research`：
+第 1 个注册成功，第 2 个开始抛出；异常逃出 `ctx.inject` 回调 → Cordis 销毁该 inject fiber
+→ **已注册的那个 provider 也一并被注销**。结果：插件 `fiberPhase=active`，但
+`stock-research` / `fund-research` / `pick-funds` … 全部 `unknown or no longer available`。
+
+这个缺陷**自 v0.3.0 加入第 2 个技能起就存在**（v0.1.0 只有 1 个技能，不会撞名），
+此前版本在真实 Host 上其实一直是 0 技能可用。自测没发现的原因是：
+`smoke.mjs` 的假 `ctx.registerProvider()` **无条件收下**，从不校验重名 —— 单元测试全绿，
+线上却是空的。
+
+### 修复
+1. **provider 名逐个唯一**：`providerNameFor(dir)` 改为按技能目录命名
+   （`dsh-invest-research:stock-research`、`…:fund-research` …），既保证唯一、又保留插件归属可读性。
+   新增 `skillIdFromDir()` 取目录末段。
+2. **注册循环全程加固**：`registerProvider` 也纳入 try/catch（此前只保护了 `createSkillProvider`）。
+   一个技能被 Host 拒绝 → **只损失这一个技能**并 warn，不再连带炸掉整批。
+   （原则与已有的「SKILL.md 损坏只跳过该技能」一致。）
+3. **测试补上重名闸门**：`smoke.mjs` 的假 `ctx.skills.registerProvider()` 现在**照真实 Host 行为
+   对重名 throw**（并可指定 `rejectNames` 模拟保留名），另加 **T5**：拒绝其中一个 provider 时，
+   其余 10 个照常注册、只 warn 1 次、被拒的技能不在结果里。
+
+### 验证（真实 Host）
+重载插件后技能目录从 **0 → 11** 全部出现：`stock-research`、`fund-research`、`decision-loop`、
+`pick-funds`、`fund-screen`、`fund-profile`、`fund-watch`、`holdings-style`、`manager-profile`、
+`report-render`、`xlsx-author`。
+
+### 测试
+- `npm test`（注册冒烟）**21 → 29 条**：新增 provider 名唯一性 3 条、`skillIdFromDir` 1 条、
+  T5 注册健壮性 4 条。
+- 全量：`npm test` 29/29 · `test_gate` 27/27 · `test_fund_tools` 38/38 · `test_peer_tools` 24/24 ·
+  `test_decision_tools` 64/64。
+
 ## 0.6.0 — 2026-10-29
 **消化 TradingAgents（TauricResearch/TradingAgents）的三个可迁移机制：时点纪律、可解析的决策信号、决策闭环。**
 

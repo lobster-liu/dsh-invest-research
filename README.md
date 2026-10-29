@@ -58,7 +58,7 @@ python assets/skills/stock-research/tools/test_gate.py
 python assets/skills/fund-research/tools/test_peer_tools.py
 # 6) 时点纪律与决策闭环离线自测(64 条断言,期望 exit 0)
 python assets/skills/fund-research/tools/test_decision_tools.py
-# 统一入口:npm test 跑 21 条注册冒烟;npm run test:all 跑全部(21+27+38+24+64)
+# 统一入口:npm test 跑 29 条注册冒烟;npm run test:all 跑全部(29+27+38+24+64)
 ```
 
 ## 时点纪律 Point-in-Time（v0.6.0 新增）
