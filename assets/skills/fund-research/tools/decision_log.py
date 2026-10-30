@@ -66,62 +66,13 @@ KNOWN_FIELDS = (
 # 决策记录的 label_conditions / conditions / notes 是自由文本，最易夹带个人
 # 头寸 / 成本 / 资金量。append 落盘前必须过门禁；命中 CRITICAL/HIGH 直接拒绝
 # 写入，**没有绕过开关**。门禁脚本缺失时**失败关闭**（宁可写不进，也不静默放行）。
+# 实现抽到同目录公共件 sanitize_gate.py，settle.py 共用同一份口径。
 # ---------------------------------------------------------------------------
-_SANITIZE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir,
-    'stock-research', 'tools', 'sanitize_check.py')
-
-# 拦截级严重度（与 sanitize_check 默认拦截级一致：CRITICAL/HIGH）
-_SANITIZE_BLOCKING = ('CRITICAL', 'HIGH')
-
-
-def _load_sanitize():
-    """按路径惰性加载共享门禁脚本；加载失败返回 None。"""
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            '_shared_sanitize_check', os.path.abspath(_SANITIZE_PATH))
-        if spec is None or spec.loader is None:
-            return None
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod
-    except Exception:
-        return None
-
-
-def _record_texts(record):
-    """递归取出记录里所有字符串值（自由文本与结构化字段一并覆盖）。"""
-    out = []
-    stack = [record]
-    while stack:
-        cur = stack.pop()
-        if isinstance(cur, str):
-            out.append(cur)
-        elif isinstance(cur, dict):
-            stack.extend(cur.values())
-        elif isinstance(cur, (list, tuple, set)):
-            stack.extend(cur)
-    return out
-
-
-def sanitize_record(record):
-    """对决策记录跑脱敏门禁。
-
-    返回 ``(命中数, 规则集合)``：
-      - 正常：``(0, '')``
-      - 被拦：``(N, 'rule1,rule2')``
-      - 门禁脚本缺失：``(-1, 'missing')``（调用方据此失败关闭）
-    """
-    sanitize = _load_sanitize()
-    if sanitize is None:
-        return -1, 'missing'
-    hits = []
-    for text in _record_texts(record):
-        hits.extend(sanitize.scan_text(text, '<record>'))
-    blocking = [h for h in hits if h.get('severity') in _SANITIZE_BLOCKING]
-    rules = sorted({h.get('rule', '?') for h in blocking})
-    return len(blocking), ','.join(rules)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from sanitize_gate import sanitize_record  # noqa: E402
+except Exception:  # pragma: no cover - 单独拷走且无 sanitize_gate 时退化
+    sanitize_record = None  # type: ignore[assignment]
 
 
 def load_ledger(path):
@@ -180,7 +131,9 @@ def append_record(path, record):
         return False, 'invalid:missing=' + ','.join(missing)
     record.setdefault('schema', SCHEMA)
 
-    # 落盘前过脱敏门禁（无绕过开关）。
+    # 落盘前过脱敏门禁（无绕过开关）。公共件缺失 → 失败关闭。
+    if sanitize_record is None:
+        return False, 'sanitize_missing'
     blocked, rules = sanitize_record(record)
     if blocked < 0:
         return False, 'sanitize_missing'

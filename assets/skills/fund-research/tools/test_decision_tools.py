@@ -248,6 +248,18 @@ eq('append 否定式合规声明过门禁（豁免词不被当成泄漏）',
    decision_log.append_record(LEDGER, _rec_neg), (True, 'appended'))
 eq('门禁通过后日志累计四条', len(decision_log.load_ledger(LEDGER)[0]), 4)
 
+# ---------- 5c. 门禁公共件 sanitize_gate（decision_log / settle 共用） ----------
+import sanitize_gate as sg  # noqa: E402
+check('decision_log 复用 sanitize_gate 的 sanitize_record（口径不漂移）',
+      decision_log.sanitize_record is sg.sanitize_record)
+eq('sanitize_text 公开政策条款通过',
+   sg.sanitize_text('单户上限100万元，本金年化1个百分点贴息。', 'probe'), (0, ''))
+check('sanitize_text 第一人称散文头寸被拦',
+      sg.sanitize_text('我持有 3 万元', 'probe')[0] > 0)
+check('is_blocked 判定（0 通过 / 正数拦截 / -1 失败关闭）',
+      sg.is_blocked((0, '')) is False and sg.is_blocked((2, 'x')) is True
+      and sg.is_blocked((-1, 'missing')) is True)
+
 # ---------- 6. 结算：入出场 / alpha / PENDING / FAILED ----------
 nav, bench = [], []
 for i in range(30):
@@ -285,6 +297,46 @@ rec_nobench = settle.settle_one(
     norm, [], 20)
 eq('无基准仍可结算原始收益', rec_nobench['状态'], 'SETTLED')
 eq('无基准则不给超额', rec_nobench['超额收益'], None)
+
+# ---------- 6b. settle 写盘前的脱敏门禁（失败关闭） ----------
+SETTLE_LEDGER = os.path.join(WORK, 'settle-ledger.jsonl')
+SETTLE_SERIES = os.path.join(WORK, 'series.json')
+SETTLE_BENCH = os.path.join(WORK, 'bench.json')
+SETTLE_OUT = os.path.join(WORK, 'settlements.json')
+with io.open(SETTLE_SERIES, 'w', encoding='utf-8') as fh:
+    json.dump({'011839': {'序列': nav}}, fh, ensure_ascii=False)
+with io.open(SETTLE_BENCH, 'w', encoding='utf-8') as fh:
+    json.dump({'序列': bench}, fh, ensure_ascii=False)
+
+
+def _run_settle(ledger_records, out_path):
+    with io.open(SETTLE_LEDGER, 'w', encoding='utf-8') as fh:
+        for rec in ledger_records:
+            fh.write(json.dumps(rec, ensure_ascii=False) + '\n')
+    if os.path.exists(out_path):
+        os.remove(out_path)
+    _argv = sys.argv
+    try:
+        sys.argv = ['settle.py', '--ledger', SETTLE_LEDGER, '--series', SETTLE_SERIES,
+                    '--benchmark', SETTLE_BENCH, '--out', out_path]
+        return settle.main()
+    finally:
+        sys.argv = _argv
+
+
+# 标签字段被写成第一人称散文（非法标签 / 台账被污染）时，结算产物不得落盘
+rc_block = _run_settle(
+    [{'run_id': 's1', 'code': '011839', 'as_of': '2026-01-05',
+      'label': '我持有 3 万元'}], SETTLE_OUT)
+check('settle 命中脱敏门禁返回 1', rc_block == 1)
+check('settle 命中脱敏门禁时不落盘', not os.path.exists(SETTLE_OUT))
+
+# 合法标签的结算记录照常落盘
+rc_ok = _run_settle(
+    [{'run_id': 's2', 'code': '011839', 'as_of': '2026-01-05',
+      'label': '优先研究'}], SETTLE_OUT)
+eq('settle 合法记录返回 0', rc_ok, 0)
+check('settle 合法记录正常落盘', os.path.exists(SETTLE_OUT))
 
 # ---------- 7. 决策质量统计：命中率只对方向性标签 ----------
 decisions = [

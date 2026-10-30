@@ -31,6 +31,12 @@ settle.py —— 决策结算（把过去的决策与已发生的行情对齐）
 输出：settlements.json，元素形如
   {"code","as_of","label","状态","原始收益","基准收益","超额收益",
    "入场日","出场日","持有交易日数","原因"}
+
+落盘门禁
+--------
+写 settlements.json **之前**跑一遍脱敏门禁（`sanitize_gate` → `sanitize_check`，
+与 decision_log.py 共用同一份规则）：命中 CRITICAL/HIGH 或门禁脚本缺失时
+**拒绝写入并返回 1**（失败关闭），不落盘半份文件。
 """
 
 import argparse
@@ -50,6 +56,12 @@ try:
     from rating import REVIEW
 except Exception:  # pragma: no cover
     REVIEW = 'REVIEW'
+try:
+    # 与 decision_log.py 共用同一份落盘门禁（sanitize_gate → sanitize_check）。
+    # 结算记录的「原因」等字段是自由文本，写盘前必须过门禁；命中即拒绝落盘。
+    from sanitize_gate import sanitize_record
+except Exception:  # pragma: no cover
+    sanitize_record = None  # type: ignore[assignment]
 
 SETTLED = 'SETTLED'
 PENDING = 'PENDING'
@@ -272,6 +284,20 @@ def main():
             '本表评估决策质量，不模拟持仓，不产生买卖建议',
         ],
     }
+    # 落盘前过脱敏门禁（与 decision_log.py 共用 sanitize_gate → sanitize_check）。
+    # 门禁公共件缺失 → 失败关闭；命中 CRITICAL/HIGH → 拒绝写入。
+    if sanitize_record is None:
+        print('[BLOCK] 门禁公共件缺失，拒绝写入 settlements.json（失败关闭）', file=sys.stderr)
+        return 1
+    blocked, rules = sanitize_record(payload, source=args.out)
+    if blocked < 0:
+        print('[BLOCK] 脱敏门禁脚本缺失，拒绝写入 settlements.json（失败关闭）', file=sys.stderr)
+        return 1
+    if blocked > 0:
+        print('[BLOCK] 结算记录命中脱敏门禁 %s，拒绝写入 %s'
+              % (rules, args.out), file=sys.stderr)
+        return 1
+
     directory = os.path.dirname(os.path.abspath(args.out))
     if directory:
         os.makedirs(directory, exist_ok=True)
