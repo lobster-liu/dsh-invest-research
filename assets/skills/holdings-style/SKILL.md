@@ -4,7 +4,7 @@ description: Analyze what funds actually hold — holdings vs label, style drift
 whenToUse: 用户要核对持仓与标签是否相符、分析风格漂移或基金间重合度时
 version: "0.1.1"
 author: 移植自 ZCode 官方插件 pick-funds v0.1.1（Z.ai）
-    tags: [基金, fund-research, FOF, ETF, LOF, 持仓]
+tags: [基金, fund-research, FOF, ETF, LOF, 持仓]
 ---
 
 # Holdings & Style Analysis

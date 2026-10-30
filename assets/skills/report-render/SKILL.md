@@ -4,7 +4,7 @@ description: Build paginated research deliverables (PDF, or DOCX where the reade
 whenToUse: 分析结果要落成 PDF 或 DOCX 文件交付、或任何多页研报型交付物时
 version: "0.1.1"
 author: 移植自 ZCode 官方插件 pick-funds v0.1.1（Z.ai）
-    tags: [基金, fund-research, FOF, ETF, LOF, 报告]
+tags: [基金, fund-research, FOF, ETF, LOF, 报告]
 ---
 
 # Report Render

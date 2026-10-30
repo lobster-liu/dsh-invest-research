@@ -24,6 +24,9 @@ decision_log.py —— 决策记录与决策日志（append-only ledger）
    它只提供「先验教训」与「上次结论是否被证伪」。这是与既有
    「单一数据源锁定」铁律的边界，必须由调用方显式声明。
 3. **不含个人头寸**：日志只存公开研究结论与公开数据，受脱敏门禁约束。
+   `label_conditions` / `conditions` / `notes` 都是自由文本，落盘前由
+   `append` 跑一遍 `stock-research/tools/sanitize_check.py`（与本 skill 共用同一份
+   规则，不另复制）；命中 CRITICAL/HIGH 直接拒绝写入，**没有绕过开关**。
 4. **写日志失败不中止研究**：日志是增强件，不是研究本身。写失败必须如实报告。
 
 用法：
@@ -57,6 +60,68 @@ KNOWN_FIELDS = (
     'label_horizon', 'confidence', 'conditions', 'benchmark', 'report_path',
     'source_skill', 'source_version', 'vocabulary_version', 'notes',
 )
+
+# ---------------------------------------------------------------------------
+# 脱敏门禁（与 stock-research/tools/sanitize_check.py 共用同一份规则）
+# 决策记录的 label_conditions / conditions / notes 是自由文本，最易夹带个人
+# 头寸 / 成本 / 资金量。append 落盘前必须过门禁；命中 CRITICAL/HIGH 直接拒绝
+# 写入，**没有绕过开关**。门禁脚本缺失时**失败关闭**（宁可写不进，也不静默放行）。
+# ---------------------------------------------------------------------------
+_SANITIZE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir,
+    'stock-research', 'tools', 'sanitize_check.py')
+
+# 拦截级严重度（与 sanitize_check 默认拦截级一致：CRITICAL/HIGH）
+_SANITIZE_BLOCKING = ('CRITICAL', 'HIGH')
+
+
+def _load_sanitize():
+    """按路径惰性加载共享门禁脚本；加载失败返回 None。"""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            '_shared_sanitize_check', os.path.abspath(_SANITIZE_PATH))
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def _record_texts(record):
+    """递归取出记录里所有字符串值（自由文本与结构化字段一并覆盖）。"""
+    out = []
+    stack = [record]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            out.append(cur)
+        elif isinstance(cur, dict):
+            stack.extend(cur.values())
+        elif isinstance(cur, (list, tuple, set)):
+            stack.extend(cur)
+    return out
+
+
+def sanitize_record(record):
+    """对决策记录跑脱敏门禁。
+
+    返回 ``(命中数, 规则集合)``：
+      - 正常：``(0, '')``
+      - 被拦：``(N, 'rule1,rule2')``
+      - 门禁脚本缺失：``(-1, 'missing')``（调用方据此失败关闭）
+    """
+    sanitize = _load_sanitize()
+    if sanitize is None:
+        return -1, 'missing'
+    hits = []
+    for text in _record_texts(record):
+        hits.extend(sanitize.scan_text(text, '<record>'))
+    blocking = [h for h in hits if h.get('severity') in _SANITIZE_BLOCKING]
+    rules = sorted({h.get('rule', '?') for h in blocking})
+    return len(blocking), ','.join(rules)
 
 
 def load_ledger(path):
@@ -104,6 +169,8 @@ def append_record(path, record):
       - 写入成功 → (True, 'appended')
       - run_id 已存在 → (False, 'duplicate:run_id=<id>')（幂等，不重复写）
       - 字段不全 → (False, 'invalid:<缺失字段>')
+      - 命中脱敏门禁 → (False, 'sanitize_blocked:<规则>')（自由文本带个人头寸）
+      - 门禁脚本缺失 → (False, 'sanitize_missing')（失败关闭）
       - 目录不可写 → (False, 'unwritable:<原因>')
     """
     if not isinstance(record, dict):
@@ -112,6 +179,13 @@ def append_record(path, record):
     if missing:
         return False, 'invalid:missing=' + ','.join(missing)
     record.setdefault('schema', SCHEMA)
+
+    # 落盘前过脱敏门禁（无绕过开关）。
+    blocked, rules = sanitize_record(record)
+    if blocked < 0:
+        return False, 'sanitize_missing'
+    if blocked > 0:
+        return False, 'sanitize_blocked:' + rules
 
     existing, _ = load_ledger(path)
     run_id = str(record.get('run_id'))

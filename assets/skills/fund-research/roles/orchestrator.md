@@ -48,9 +48,15 @@
 
 **结论标签（只能取其一，且必须写条件）**：`优先研究` / `可以关注` / `等待验证` / `暂不优先` / `数据不足`。
 
-> **词表唯一定义在 `$TOOLS/rating.py`**（`LABELS` 常量）。本文件、`peer-orchestrator.md`
-> 与 `comparator.py` 都从那里读，**任何角色不得自行硬编码另一套标签集合**——
-> 词表一漂移，历史决策就无法被正确解析与结算。
+> **词表唯一定义在 `$TOOLS/rating.py`**（`LABELS` 常量）。
+> - `comparator.py` **在代码里** `from rating import LABELS, REVIEW, parse_label, is_review`，
+>   解析失败一律记 `REVIEW`，绝不静默退化成中性标签；
+> - 本角色提示词（本文件）与 `peer-orchestrator.md` **不 import 该模块**，而是把同一 5 档
+>   标签作为约束写进提示词——两者必须始终与 `rating.LABELS` 保持一致；
+> - `peer-orchestrator.md` 的对比结论只落在 `comparison.md`，**不写 `decision.json`**
+>   （账本按单标的计，见 fund-research `SKILL.md` 阶段 6 的边界说明）。
+>
+> **任何角色不得自行硬编码另一套标签集合**——词表一漂移，历史决策就无法被正确解析与结算。
 >
 > **标签必须落盘（强制）**：裁决完成后写 `$RUN/decision.json`，字段见 `decision-loop` skill；
 > `label` 只能是 5 档之一，写不出时写 `REVIEW`（**不得**省略该字段，也**不得**

@@ -4,7 +4,7 @@ description: Produce a professional .xlsx workbook on disk with openpyxl — for
 whenToUse: 表格类成果要落成 .xlsx 文件交付时（筛选结果、持仓明细、模型工作簿）
 version: "0.1.1"
 author: 移植自 ZCode 官方插件 pick-funds v0.1.1（Z.ai）
-    tags: [基金, fund-research, FOF, ETF, LOF, 表格]
+tags: [基金, fund-research, FOF, ETF, LOF, 表格]
 ---
 
 # xlsx-author

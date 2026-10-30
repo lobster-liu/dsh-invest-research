@@ -28,6 +28,8 @@ description: 决策闭环流水线。把每次研究的结论写成结构化决�
   不要去找 `$BASE/tools`（那里没有）：
   `decision_log.py` / `settle.py` / `decision_score.py` / `rating.py`。
   （`rating.py` 是结论标签词表的唯一权威来源；两个 skill 读的是同一个文件。）
+- `$SHARED` = `$BASE/../stock-research/tools`
+  —— 共用 `sanitize_check.py` 脱敏门禁（与 fund-research 同一文件，不另复制）。
 - `$PY`     —— Python 解释器：环境变量 `EQUITY_PY` → DSH 内置运行时 → PATH 中的 `python`
 - `$LOG`    —— 决策日志目录：`<用户当前工作区>\invest-decisions\`
   （`ledger.jsonl` 只增追加；未配置则本 skill 降级为「不写日志」，并在输出中如实说明）
@@ -54,7 +56,10 @@ description: 决策闭环流水线。把每次研究的结论写成结构化决�
    但样本数必须单独列出。
 9. **前视偏差必须披露**：结论标签词表与阈值会随版本变化，跨版本的决策
    **不得**合并进同一分组统计；输出必须附前视偏差说明。
-10. **个人头寸零落盘**：日志只存公开研究结论与公开数据。
+10. **个人头寸零落盘**：**账本只存公开结论，不含任何个人头寸。**
+    用户给的持仓成本、组合占比、资金量只在会话内用于「已持有 / 期限 / 风险承受」判断，
+    **绝不写入** `ledger.jsonl` / `reflections.jsonl` / `settlements.json`。
+    落盘前过脱敏门禁，无绕过开关。
 
 ## 角色文件（派发子代理时，读取对应文件作为其完整提示词）
 ```
@@ -98,6 +103,8 @@ roles/quality-analyst.md  质量分析师：按标签聚合出决策质量统计
 & "$PY" "$TOOLS/decision_log.py" append --ledger "$LOG\ledger.jsonl" --record "$RUN\decision.json"
 ```
 - 退出码 0 = 已写入；1 = 重复或字段不全。
+- **追加前过门禁**：先跑 `& "$PY" "$SHARED/sanitize_check.py" "$RUN\decision.json" --json`；
+  退出码非 0 → 脱敏重写后再追加，**禁止写入含个人头寸的记录**。
 - **写日志失败不中止研究**，但必须在报告里如实写「决策日志未写入：<原因>」。
 
 ### 阶段 2：结算（对已到期决策）
@@ -114,6 +121,8 @@ roles/quality-analyst.md  质量分析师：按标签聚合出决策质量统计
 - 当初的核心成立条件是否被观测到？证伪条件是否触发？
 - 偏差来自分析判断，还是来自数据缺口（当初就缺的那一项）？
 - 一条能带到下一次同类分析的**具体**教训。
+- **写 `$RUN/reflections.jsonl` 前过门禁**：`& "$PY" "$SHARED/sanitize_check.py" "$RUN" --json`；
+  退出码非 0 → 脱敏重写，**禁止写入**。复盘散文是自由文本，是个人头寸/成本最易夹带的落点。
 
 ### 阶段 4：决策质量统计
 ```powershell
@@ -124,6 +133,23 @@ roles/quality-analyst.md  质量分析师：按标签聚合出决策质量统计
   `等待验证` / `数据不足` / `REVIEW` 无方向，**不计命中率**，但列出样本数；
 - 未到期 / 结算失败 / 不可解析的单元**全部显式列出**；
 - 输出末尾附**前视偏差说明**（词表版本分组 + 已知偏差来源）。
+
+### 脱敏门禁（决策闭环全流程强制，不可绕过）
+本 skill 会落盘 `ledger.jsonl` / `settlements.json` / `reflections.jsonl` / `decision-quality.md`，
+其中 `label_conditions`、`conditions`、复盘散文都是**自由文本**，最容易夹带个人头寸、成本、
+资金量、账号。门禁脚本与 stock-research / fund-research **共用同一份**
+（`$SHARED/sanitize_check.py`），**不单独复制**，避免规则漂移：
+
+```powershell
+& "$PY" "$SHARED/sanitize_check.py" <待落盘的文件或目录> --json
+```
+
+- 退出码 0 = 可落盘；非 0 → 脱敏重写后重跑，**禁止写入**，不得删规则放行；
+- 门禁覆盖**本 skill 的全部落点**：`decision.json`（阶段 1）、`settlements.json`（阶段 2）、
+  `reflections.jsonl`（阶段 3）、`decision-quality.md`（阶段 4）；
+- 门禁只放行**公开研究结论与公开数据**；个人头寸 / 成本 / 资金量一律拦截；
+- 与「写日志失败不中止研究」的边界：门禁拦的是**含个人头寸的落盘动作**，
+  重写后仍写不进才记「决策日志未写入：<原因>」。
 
 ## 输出格式
 

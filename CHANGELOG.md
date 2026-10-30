@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.6.3 — 2026-10-30
+**上游复核 v0.6.2 的 7 项反馈（1 项 P1 + 1 项 P2 + 4 项 P3 + 1 项开放问题）。**
+
+### P1（可能阻断）pick-funds 套件 8 个技能 frontmatter 的 `tags:` 缩进 4 空格
+- 8 个 `SKILL.md`（`pick-funds` / `fund-profile` / `fund-screen` / `fund-watch` /
+  `holdings-style` / `manager-profile` / `report-render` / `xlsx-author`）第 7 行的 `tags:`
+  被缩进 4 空格：严格 YAML 解析抛 `ScannerError`；宽松解析下 `tags` 被并入 `author` 标量。
+- → 8 个 `tags:` 全部改为**顶格**。
+- **根因澄清**：本插件 `lib/skill.js` 的 `parseSkillFile()` 用的是**行式正则**
+  （`^key:[ \t]*(.*)$`），只取 `name` / `description`，**不读 `tags`** —— 所以注册没炸、
+  `tags` 本来就是死字段。风险在于：一旦宿主改用 YAML 解析、或任何工具按 `tags`
+  过滤/路由，这 8 个技能会整体失效（与 v0.6.1 修过的「同层重名 → 一个技能都没注册」同类）。
+- **回归防护**：`test/smoke.mjs` 新增 **T6**，对全部 11 个 `SKILL.md` 断言「frontmatter
+  无缩进顶层键」；`npm test` 29 → 30。
+
+### P2（安全面）decision-loop 全流程不过脱敏门禁
+- `decision-loop` 会落盘 `ledger.jsonl` / `settlements.json` / `reflections.jsonl` /
+  `decision-quality.md`，其中 `label_conditions` / `conditions` / 复盘散文是自由文本，
+  而 stock-research / fund-research 两条流水线都有门禁，闭环这条没有。
+- → **机器强制（无绕过开关）**：`decision_log.py append` 落盘前调用
+  `stock-research/tools/sanitize_check.py` 的 `scan_text()`，命中 CRITICAL/HIGH 直接返回
+  `sanitize_blocked:<规则>` 且**不写入**；门禁脚本缺失时 `sanitize_missing` **失败关闭**
+  （宁可写不进，也不静默放行）。
+- → **文档强制**：`decision-loop/SKILL.md` 新增「脱敏门禁」小节（覆盖阶段 1–4 全部落点、
+  与 stock/fund 共用同一份脚本不另复制），核心原则 10 明写「**账本只存公开结论，
+  不含任何个人头寸**」；`roles/settlement.md` 与 `roles/reflection.md` 各加一条
+  「个人头寸零落盘 + 门禁非 0 禁止写入」。
+- 门禁只放行公开研究结论与公开数据；公开政策条款（`单户上限100万元…`）与否定式合规声明
+  （`本报告不涉及任何资金规模…`）不误伤（沿用 `test_gate.py` 的既有豁免语义）。
+
+### P3 文档修正（4 项）
+1. `fund-research/SKILL.md`：删除第 101–102 行**逐字重复**的同一句（`fundf10` 补抓说明）。
+2. `fund-research/roles/orchestrator.md`：原称「本文件、`peer-orchestrator.md` 与
+   `comparator.py` 都从 `rating.py` 读词表」——**不实**。实测 `comparator.py` 在代码里
+   `from rating import LABELS, REVIEW, parse_label, is_review`；两个角色提示词
+   （`orchestrator.md` / `peer-orchestrator.md`）**并不 import**，只是把同一 5 档标签
+   写进提示词约束。→ 改写为「代码导入 vs 提示词约束」两条路径的准确描述，并说明
+   `peer-orchestrator.md` 的对比结论只落 `comparison.md`、不写 `decision.json`。
+3. `decision-loop/roles/reflection.md` 铁律 5 断句：「来当初就知道」→「来替代「当初已知的信息」」。
+4. `fund-research/SKILL.md` 的 `$TOOLS` 清单漏列 `rating.py` / `decision_log.py` /
+   `settle.py` / `decision_score.py` / `test_peer_tools.py` / `test_decision_tools.py`
+   （正文已在调用）→ 清单补全。
+
+### 开放问题定调：阶段 6 对比层结论不写 `decision.json`
+- 上游问「设计如此，还是漏了」。**定调：按设计不登记**。`ledger.jsonl` 每条记录绑定单个
+  `code`，而对比层的「谁更优 / 是否可排序」是**相对判断**，不属于任一单标的的决策；
+  复用阶段 5 的 append 会把它错记到锚点基金名下，污染 `decision_score.py` 的分组统计。
+- → 在 `fund-research/SKILL.md` 阶段 6「第四步 · 协调员裁决」下加边界说明：每只同业基金
+  各自在阶段 5 已写各自的 `decision.json`，对比层只产出 `comparison.md`；若未来要让对比
+  结论进入统计，须先设计不挂 `code` 的独立记录类型，而不是复用现有 append。
+
+### 测试
+- `test/smoke.mjs` **29 → 30**（新增 T6 frontmatter 结构断言）。
+- `test_decision_tools.py` **64 → 69**（新增 5 条：PII 记录被拒且不落盘、政策条款放行、
+  否定式声明放行、门禁通过后累计条数）。
+- 全量：`npm test` 30/30 · `test_gate` 27/27 · `test_fund_tools` 38/38 ·
+  `test_peer_tools` 24/24 · `test_decision_tools` 69/69。
+
 ## 0.6.2 — 2026-10-29
 **修正 `decision-loop` 技能里的工具路径（文档修正，无代码变更）。**
 

@@ -4,7 +4,7 @@ description: '基金研究套件入口：FOF/经理研究分析师的工作模�
 whenToUse: 任何基金或基金经理研究任务（筛选/画像/跟踪/持仓分析/比较）的入口；先载入本技能获取共享护栏与数据源优先级，再按工作模式载入对应技能
 version: "0.1.1"
 author: 移植自 ZCode 官方插件 pick-funds v0.1.1（Z.ai）
-    tags: [基金, fund-research, FOF, ETF, LOF, 入口, guardrails]
+tags: [基金, fund-research, FOF, ETF, LOF, 入口, guardrails]
 ---
 
 # pick-funds — 基金研究套件入口

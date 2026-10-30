@@ -4,7 +4,7 @@ description: Profile a fund manager across all managed products and full career 
 whenToUse: 用户要评估一位基金经理的跨产品履历、风格与容量时
 version: "0.1.1"
 author: 移植自 ZCode 官方插件 pick-funds v0.1.1（Z.ai）
-    tags: [基金, fund-research, FOF, ETF, LOF, 经理]
+tags: [基金, fund-research, FOF, ETF, LOF, 经理]
 ---
 
 # Fund Manager Profile

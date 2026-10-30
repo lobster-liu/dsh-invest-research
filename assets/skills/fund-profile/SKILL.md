@@ -4,7 +4,7 @@ description: Deep-dive profile of a single fund — performance vs benchmark and
 whenToUse: 用户要单只基金的深度画像（业绩、风险、费率、规模申赎、持仓、持有人）时
 version: "0.1.1"
 author: 移植自 ZCode 官方插件 pick-funds v0.1.1（Z.ai）
-    tags: [基金, fund-research, FOF, ETF, LOF, 画像]
+tags: [基金, fund-research, FOF, ETF, LOF, 画像]
 ---
 
 # Fund Profile

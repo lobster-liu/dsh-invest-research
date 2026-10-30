@@ -16,7 +16,7 @@ description: 多智能体协同的基金穿透式研究流水线。7 角色（�
 
 ## 环境解析（执行任何命令前先做一次，全程复用）
 - `$BASE`   —— 本 skill 的 base 目录（DSH 加载 skill 时会在提示中给出）
-- `$TOOLS`  = `$BASE/tools`（`fetch_fund.py` / `peer_builder.py` / `comparator.py` / `test_fund_tools.py`；**产物绝不写入插件目录**）
+- `$TOOLS`  = `$BASE/tools`（`fetch_fund.py` / `peer_builder.py` / `comparator.py` / `rating.py` / `decision_log.py` / `settle.py` / `decision_score.py` / `test_fund_tools.py` / `test_peer_tools.py` / `test_decision_tools.py`；**产物绝不写入插件目录**）
 - `$SHARED` = `$BASE/../stock-research/tools`（共用 `sanitize_check.py` 门禁、`fetch_fundamentals.py` 个股财务、`fetch_data.py` 个股行情、`pit.py` 时点底座）
 - `$PY`     —— Python 解释器，按优先级：
   1. 环境变量 `EQUITY_PY`；
@@ -99,7 +99,6 @@ $ASOF = (Get-Date -Format 'yyyy-MM-dd')   # 分析基准日
 （**退出码 1 = 全通道取数失败，禁止带空数据继续**；可选 `--benchmark sh000300` 指定基准指数；`--rf 1.5` 才计算夏普比率，未给则该指标为 `未取得`。）
 **`--as-of` 不可省**：它把净值序列截断到基准日，并把「基准日尚未公开」的持仓期挡在事实底稿之外。
 需要更完整的持仓或行业配置时（`fundf10` 通道间歇可达），由 Agent1 用 `web_call` 的 `read.fetch` 补抓，并把补到的数据**合并进同一份 `fund.json`**（标注来源），不得另建第二个事实源。
-需要更完整的持仓或行业配置时（`fundf10` 通道间歇可达），由 Agent1 用 `web_call` 的 `read.fetch` 补抓，并把补到的数据**合并进同一份 `fund.json`**（标注来源），不得另建第二个事实源。
 底稿冻结后，阶段 3 的四路 Agent **只能读 `$RUN/fund.json` 与 Agent1 的底稿摘要**，不得各自另找一套数据。
 
 ### 阶段 3：四路并行独立研究
@@ -159,6 +158,13 @@ red-team 逐条质疑 4 份对比结论：同源假验证 / 样本冒充全组�
 
 **第四步 · 协调员裁决**：
 读 `$CMP/work/` 下全部 5 份角色文件，按证据质量裁决，产出 `$CMP/comparison.md`，最后过门禁。
+
+> **对比层结论不写入决策日志（账本按单标的计）**：`ledger.jsonl` 每条记录绑定单个 `code`，
+> 而对比层的「谁更优 / 是否可排序 / 是否可判定」是**相对判断**，不属于任一单标的的决策。
+> 把它复用阶段 5 的 append 写进账本，会把这个相对结论错记到锚点基金名下，
+> 污染 `decision_score.py` 按标的的分组统计。因此**按设计不登记**：
+> 每只同业基金各自在阶段 5 已写各自的 `decision.json`，对比层只产出 `comparison.md`。
+> 若未来要让对比结论进入统计，须先为它设计独立的记录类型（不挂 `code`），而不是复用现有 append。
 
 **对比层铁律（原则固定；下列数字均为某次实测的示例数据，非通用统计，复用时须按本次数据重算）**：
 1. **披露事实 vs 分析判断必须显式分开**（见 `comparison.md` 第 4 节）。分析判断（如按股票名称手工归集的"某链条≈54%主导"）**不得用于量化裁决**。

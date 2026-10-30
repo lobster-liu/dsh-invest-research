@@ -56,9 +56,9 @@ python assets/skills/fund-research/tools/test_fund_tools.py
 python assets/skills/stock-research/tools/test_gate.py
 # 5) 对比层工具离线自测(24 条断言,期望 exit 0;含 ETF/联接份额、短码补零、--track 仍解析锚点名、关键词截断、https 回退、列表外代码不误拒、标签锚定解析)
 python assets/skills/fund-research/tools/test_peer_tools.py
-# 6) 时点纪律与决策闭环离线自测(64 条断言,期望 exit 0)
+# 6) 时点纪律与决策闭环离线自测(69 条断言,期望 exit 0)
 python assets/skills/fund-research/tools/test_decision_tools.py
-# 统一入口:npm test 跑 29 条注册冒烟;npm run test:all 跑全部(29+27+38+24+64)
+# 统一入口:npm test 跑 30 条注册冒烟;npm run test:all 跑全部(30+27+38+24+69)
 ```
 
 ## 时点纪律 Point-in-Time（v0.6.0 新增）
@@ -143,12 +143,12 @@ python assets/skills/fund-research/tools/decision_score.py --ledger invest-decis
 | `assets/skills/fund-research/tools/peer_builder.py` | **(v0.5.5)** 同业筛选器:**脚本执行 3 条**(跟踪标的严格相等 / 仅被动型 / 非同一基金不同份额)+ **标记 1 条**(结构差异);**交易状态与份额类别一致性不执行**,写入 `agent_review_required[]` 交 Agent-P1 人工复核,**只筛不评**;候选支持 `--codes`(列表外代码先抓身份页兜底,类型仍未知时记 `type_unknown_codes[]` + `agent_review_required(type_unverified)`,不按非被动型误拒)/ `--keyword`(被动型预筛 + `--max-candidates>=1` 上限)/ `--track`(仍解析锚点简称,不静默关掉判据 C);基金列表源 https 优先、**抓取与解析失败都回退 http** |
 | `assets/skills/fund-research/tools/comparator.py` | **(v0.4.0)** 对比矩阵生成器:读 `peers.json` + 各基金 `report.md`/`fund.json`,对齐已冻结结论、暴露口径冲突,**不重算指标**;**(v0.6.0)** 结论标签改走 `rating.py` 锚定解析器(修复全文档子串扫描缺陷),`REVIEW` 单独统计 |
 | `assets/skills/fund-research/tools/rating.py` | **(v0.6.0)** 结论标签**唯一权威词表**(5 档)+ `REVIEW` 哨兵 + NFKC/加粗容忍的锚定解析器 + 方向性标签集合 |
-| `assets/skills/fund-research/tools/decision_log.py` | **(v0.6.0)** 只增追加的决策日志(`ledger.jsonl`):按 `run_id` 幂等去重、损坏行不阻断读取但计数上报、`verify` 校验 |
+| `assets/skills/fund-research/tools/decision_log.py` | **(v0.6.0 / v0.6.3 起 append 内建落盘脱敏门禁)** 只增追加的决策日志(`ledger.jsonl`):按 `run_id` 幂等去重、损坏行不阻断读取但计数上报、`verify` 校验;**追加前对自由文本跑 `sanitize_check.py`,命中 CRITICAL/HIGH 直接拒绝写入(无绕过开关)** |
 | `assets/skills/fund-research/tools/settle.py` | **(v0.6.0)** 决策结算:入场取决策日之后第一个收盘日,算原始/基准/超额,判 `SETTLED`/`PENDING`/`SETTLE_FAILED` |
 | `assets/skills/fund-research/tools/decision_score.py` | **(v0.6.0)** 决策质量回测:按标签聚合 n/平均超额/命中率(仅方向性标签),未结算单元显式列出,附**前视偏差说明** |
-| `assets/skills/fund-research/tools/test_decision_tools.py` | **(v0.6.0)** 64 条离线断言(时点纪律 + 标签解析 + 日志幂等 + 结算口径 + 命中率口径;零网络) |
-| `assets/skills/decision-loop/SKILL.md` + `roles/*.md` ×3 | **(v0.6.0)** 决策闭环技能:登记 → 结算 → 复盘 → 质量统计 |
-| `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.5.4)** 对比层 23 条离线断言(含 `某ETF` 不得判成 F 份额、`11839→011839` 补零、`--track` 不得让判据 C 失效、`--keyword` 预筛+截断+下限、https 连接层/解析层回退、列表外代码不得按非被动型误拒六项回归;纯逻辑 + 工作区临时目录 fixture,零网络) |
+| `assets/skills/fund-research/tools/test_decision_tools.py` | **(v0.6.0 / v0.6.3 +5 条脱敏门禁用例)** 69 条离线断言(时点纪律 + 标签解析 + 日志幂等 + **落盘脱敏门禁** + 结算口径 + 命中率口径;零网络) |
+| `assets/skills/decision-loop/SKILL.md` + `roles/*.md` ×3 | **(v0.6.0 / v0.6.3 起全流程过脱敏门禁)** 决策闭环技能:登记 → 结算 → 复盘 → 质量统计;落盘前跑 `sanitize_check.py`,退出码非 0 禁止写入;**账本只存公开结论,不含任何个人头寸** |
+| `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.5.4)** 对比层 24 条离线断言(含 `某ETF` 不得判成 F 份额、`11839→011839` 补零、`--track` 不得让判据 C 失效、`--keyword` 预筛+截断+下限、https 连接层/解析层回退、列表外代码不得按非被动型误拒、标签锚定解析七项回归;纯逻辑 + 工作区临时目录 fixture,零网络) |
 | `tools/sanitize_check.py` | 落盘前 PII 门禁:5 类泄漏规则 + 5 层公开信息白名单(财报科目/政策条款/金融术语/**基金公开披露**/否定声明);混合陷阱必拦 |
 | `tools/test_gate.py` | 门禁行为自检 27 场景(真泄漏必拦/公开条款必放/基金披露必放/陷阱必拦) |
 | `tools/run_pipeline.ps1` | Windows PowerShell 引导脚本(ASCII-only,PS 5.1 兼容) |

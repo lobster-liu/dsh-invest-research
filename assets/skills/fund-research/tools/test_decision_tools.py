@@ -221,6 +221,33 @@ eq('损坏行计数', broken, 1)
 check('verify 报告损坏行',
       any('损坏' in p or '无法解析' in p for p in decision_log.verify(loaded, broken)))
 
+# ---------- 5b. 决策日志落盘前的脱敏门禁（append 内建，无绕过开关） ----------
+# 决策记录的 label_conditions / conditions / notes 是自由文本，最易夹带个人头寸。
+# 门禁脚本与 stock-research 共用同一份（stock-research/tools/sanitize_check.py）。
+_rec_pii = {'run_id': 'r-pii', 'code': '011839', 'as_of': '2026-06-30',
+            'label': '可以关注',
+            'label_conditions': '我持仓 12000 股，成本价 8.35 元，投入资金 10 万元。'}
+ok_pii, why_pii = decision_log.append_record(LEDGER, _rec_pii)
+check('append 命中脱敏门禁被拒（个人头寸/成本/资金量）',
+      ok_pii is False and why_pii.startswith('sanitize_blocked'))
+eq('被拒记录没有落盘（日志行数不变）',
+   len(decision_log.load_ledger(LEDGER)[0]), 2)
+
+# 公开政策条款是合规表述，不得被误伤
+_rec_pub = {'run_id': 'r-pub', 'code': '011839', 'as_of': '2026-06-30',
+            'label': '等待验证',
+            'label_conditions': '单户上限100万元，本金年化1个百分点贴息，资金总规模不设上限。'}
+eq('append 公开政策条款过门禁（政策数字不误伤）',
+   decision_log.append_record(LEDGER, _rec_pub), (True, 'appended'))
+
+# 否定式合规声明（含数字）也不得被误伤
+_rec_neg = {'run_id': 'r-neg', 'code': '012733', 'as_of': '2026-06-30',
+            'label': '数据不足',
+            'label_conditions': '本报告不涉及任何资金规模 100 万元，也未记录个人持仓 12000 股。'}
+eq('append 否定式合规声明过门禁（豁免词不被当成泄漏）',
+   decision_log.append_record(LEDGER, _rec_neg), (True, 'appended'))
+eq('门禁通过后日志累计四条', len(decision_log.load_ledger(LEDGER)[0]), 4)
+
 # ---------- 6. 结算：入出场 / alpha / PENDING / FAILED ----------
 nav, bench = [], []
 for i in range(30):

@@ -4,7 +4,7 @@ description: Multi-criteria fund screening across mutual funds, ETFs, and LOFs �
 whenToUse: 用户要按条件筛选基金、产出候选池或榜单时
 version: "0.1.1"
 author: 移植自 ZCode 官方插件 pick-funds v0.1.1（Z.ai）
-    tags: [基金, fund-research, FOF, ETF, LOF, 筛选]
+tags: [基金, fund-research, FOF, ETF, LOF, 筛选]
 ---
 
 # Fund Screening

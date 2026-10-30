@@ -4,8 +4,9 @@
  *   T2 无 skills 服务: apply() 不抛错, 静默降级
  *   T3 其中一个 SKILL.md 损坏: 其余照常注册, 坏的那个只 warn
  *   T4 parseSkillFile 边界 + 目录解析
+ *   T6 所有 SKILL.md 的 frontmatter 顶层键必须顶格（缩进会让 YAML 解析器整体报错）
  */
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -165,6 +166,33 @@ const { registerSkillsWhenAvailable, registerSkillWhenAvailable, createSkillProv
   const fund = readSkill(FUND_DIR);
   ok('T4 fund-research description loaded', fund.description.length > 30
      && fund.description.includes('基金'));
+}
+
+// ---- T6 frontmatter 结构：顶层键不得缩进 ----
+// v0.6.2 上游复核发现 pick-funds 套件 8 个 SKILL.md 把 `tags:` 缩进了 4 空格：
+//   - 严格 YAML 解析器直接抛 ScannerError（tags 被并进 author 标量）；
+//   - 宽松解析器下 tags 键也不存在。
+// 本插件自带的是**行式正则**解析器（只取 name/description，不读 tags），所以注册没炸；
+// 但一旦宿主改用 YAML 解析、或任何工具按 tags 过滤/路由，这 8 个技能会整体失效
+// （v0.6.1 刚修过「同层重名 → 一个技能都没注册」的同类阻断）。这里加一条离线结构断言。
+{
+  const bad = [];
+  // SKILL_DIRS 项是绝对路径（asset/skills/<name>/），直接拼文件名即可
+  for (const dir of SKILL_DIRS) {
+    const p = dir + 'SKILL.md';
+    let raw;
+    try { raw = readFileSync(p, 'utf8'); } catch { bad.push(dir + ' (SKILL.md 缺失)'); continue; }
+    const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
+    if (!m) { bad.push(dir + ' (无 frontmatter)'); continue; }
+    m[1].split(/\r?\n/).forEach((line, i) => {
+      // 顶层键必须顶格；缩进的 `key:` 会让 YAML 把它并入上一个标量值
+      if (/^\s+\S/.test(line) && /^\s*\S[^:]*:/.test(line)) {
+        bad.push(`${dir}:第${i + 1}行 缩进顶层键「${line.trim()}」`);
+      }
+    });
+  }
+  ok('T6 无缩进的顶层 frontmatter 键（pick-funds 套件 tags 已顶格）', bad.length === 0);
+  if (bad.length) console.log('    ' + bad.join('\n    '));
 }
 
 // ---- T5 注册健壮性：单个 provider 被 Host 拒绝，其余照常注册 ----

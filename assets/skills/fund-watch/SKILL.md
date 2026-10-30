@@ -4,7 +4,7 @@ description: Ongoing monitoring of held or shortlisted funds over a window — m
 whenToUse: 用户要持续跟踪持有或入围的基金、检查窗口内有无异动时
 version: "0.1.1"
 author: 移植自 ZCode 官方插件 pick-funds v0.1.1（Z.ai）
-    tags: [基金, fund-research, FOF, ETF, LOF, 跟踪]
+tags: [基金, fund-research, FOF, ETF, LOF, 跟踪]
 ---
 
 # Fund Watch
