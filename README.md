@@ -61,13 +61,13 @@ python assets/skills/stock-research/tools/fetch_data.py --code 600000 --out /tmp
 python assets/skills/fund-research/tools/fetch_fund.py --code 025490 --out /tmp/fr/fund.json --peer-stocks 10
 # 3) 基金取数器离线自测(38 条断言,不依赖网络,期望 exit 0)
 python assets/skills/fund-research/tools/test_fund_tools.py
-# 4) 脱敏门禁行为自检(122 场景,期望 exit 0)
+# 4) 脱敏门禁行为自检(134 场景,期望 exit 0)
 python assets/skills/stock-research/tools/test_gate.py
 # 5) 对比层工具离线自测(24 条断言,期望 exit 0;含 ETF/联接份额、短码补零、--track 仍解析锚点名、关键词截断、https 回退、列表外代码不误拒、标签锚定解析)
 python assets/skills/fund-research/tools/test_peer_tools.py
 # 6) 时点纪律与决策闭环离线自测(77 条断言,期望 exit 0)
 python assets/skills/fund-research/tools/test_decision_tools.py
-# 统一入口:npm test 跑 30 条注册冒烟;npm run test:all 跑全部(30+122+38+24+77)
+# 统一入口:npm test 跑 30 条注册冒烟;npm run test:all 跑全部(30+134+38+24+77)
 ```
 
 ## 时点纪律 Point-in-Time（v0.6.0 新增）
@@ -159,8 +159,8 @@ python assets/skills/fund-research/tools/decision_score.py --ledger invest-decis
 | `assets/skills/fund-research/tools/test_decision_tools.py` | **(v0.6.0 / v0.6.3 +5 条 / v0.6.4 +8 条)** 77 条离线断言(时点纪律 + 标签解析 + 日志幂等 + **落盘脱敏门禁(含 settle 拒写)** + 结算口径 + 命中率口径;零网络) |
 | `assets/skills/decision-loop/SKILL.md` + `roles/*.md` ×3 | **(v0.6.0 / v0.6.3 起过脱敏门禁)** 决策闭环技能:登记 → 结算 → 复盘 → 质量统计;**阶段 1/2 由代码强制(decision_log.py / settle.py 内置),阶段 3/4 由角色自查**;**账本只存公开结论,不含任何个人头寸** |
 | `assets/skills/fund-research/tools/test_peer_tools.py` | **(v0.5.4)** 对比层 24 条离线断言(含 `某ETF` 不得判成 F 份额、`11839→011839` 补零、`--track` 不得让判据 C 失效、`--keyword` 预筛+截断+下限、https 连接层/解析层回退、列表外代码不得按非被动型误拒、标签锚定解析七项回归;纯逻辑 + 工作区临时目录 fixture,零网络) |
-| `tools/sanitize_check.py` | 落盘前 PII 门禁:泄漏规则(持仓/成本/资金/盈亏/账户 + **v0.6.4 起 `personal_amount`:自持动词/第一人称所有格/第一人称+自持动词 + 金额的组合规则** + **v0.6.7 起 `personal_ownership`:金额 + 属于/归/是 + 显式个人 + 个人名词的反向锚定规则(v0.6.8 扩到 5 族变体:个人名词扩表 / 归属动词扩到 算作/即 / 语序颠倒 / 无名词后缀;v0.6.9 补 私人/私有 修饰前缀 与 所有/名下 收句尾巴;v0.6.10 收口:该规则**不继承**金融术语/政策条款两类豁免——归属声明自带「钱归谁」语义,术语表会把它整条放掉——并新增「金额在场」分支 C2 覆盖 算作/即 收句)**) + 5 层公开信息白名单(财报科目/政策条款/金融术语/**基金公开披露**/**机构主语 + 持仓动词/资金名词**/否定声明);混合陷阱必拦、政策豁免不跨句 |
-| `tools/test_gate.py` | 门禁行为自检 **122 场景**(真泄漏必拦(含第一人称散文绕过 + 观点句里的个人头寸一律照拦 + 金额后个人化从句 + 5 族归属变体 + 私人/私有与所有/名下两处加宽承重守卫 + 归属声明短接 fin-term/policy 承重守卫 + 金额在场分支 C2 承重守卫)/公开条款必放(含观点句里的公开口径)/基金披露必放/机构主语必放(personal_amount + capital_amount)/公司自有资金必放/机构自述「我方」必放/机构主语豁免窗口常数承重守卫/署名元叙述必放/陷阱必拦) |
+| `tools/sanitize_check.py` | 落盘前 PII 门禁:泄漏规则(持仓/成本/资金/盈亏/账户 + **v0.6.4 起 `personal_amount`:自持动词/第一人称所有格/第一人称+自持动词 + 金额的组合规则** + **v0.6.7 起 `personal_ownership`:金额 + 属于/归/是 + 显式个人 + 个人名词的反向锚定规则(v0.6.8 扩到 5 族变体:个人名词扩表 / 归属动词扩到 算作/即 / 语序颠倒 / 无名词后缀;v0.6.9 补 私人/私有 修饰前缀 与 所有/名下 收句尾巴;v0.6.10 收口:该规则**不继承**金融术语/政策条款两类豁免——归属声明自带「钱归谁」语义,术语表会把它整条放掉——并新增「金额在场」分支 C2 覆盖 算作/即 收句;v0.6.11 CAND-FT 自述句例外:紧挨命中处前面是 我/本人/自己(可隔一个「的」)时,术语表豁免对 `personal_amount`/`capital_amount` 失效——「自有资金/自有资产/自有资本」在自述句里就是自己的钱,机构口径与「我认为自有资金…」不受影响)**) + 5 层公开信息白名单(财报科目/政策条款/金融术语/**基金公开披露**/**机构主语 + 持仓动词/资金名词**/否定声明);混合陷阱必拦、政策豁免不跨句 |
+| `tools/test_gate.py` | 门禁行为自检 **134 场景**(真泄漏必拦(含第一人称散文绕过 + 观点句里的个人头寸一律照拦 + 金额后个人化从句 + 5 族归属变体 + 私人/私有与所有/名下两处加宽承重守卫 + 归属声明短接 fin-term/policy 承重守卫 + 金额在场分支 C2 承重守卫 + 自述句例外 CAND-FT 承重守卫(含 2 条只有「的」这一格能闭的))/公开条款必放(含观点句里的公开口径)/基金披露必放/机构主语必放(personal_amount + capital_amount)/公司自有资金必放/机构自述「我方」必放/机构主语豁免窗口常数承重守卫/署名元叙述必放/紧邻第一人称反例必放/陷阱必拦) |
 | `tools/run_pipeline.ps1` | Windows PowerShell 引导脚本(ASCII-only,PS 5.1 兼容) |
 
 ## pick-funds 分析师套件（v0.5.0 新增）
