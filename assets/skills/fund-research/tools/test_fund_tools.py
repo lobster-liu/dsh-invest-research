@@ -167,8 +167,11 @@ eq('_max_drawdown 1.0->2.0->1.0 = -0.5，起点 d2 / 谷底 d3',
 eq('_percentile 升序[1..5]当前=5 -> 80.0（严格小于占比）；降序 -> 0.0',
    (ff._percentile([('d%d' % i, i) for i in range(1, 6)]),
     ff._percentile([('d%d' % i, 6 - i) for i in range(1, 6)])), (80.0, 0.0))
-near('_annualized 244 日翻倍 -> 1.0',
-     ff._annualized([('d%03d' % i, 1.0 if i == 0 else 2.0) for i in range(245)], 244), 1.0)
+near('_annualized 244 日翻倍、年频率显式给 244 -> 1.0（年频率不再硬编）',
+     ff._annualized([('d%03d' % i, 1.0 if i == 0 else 2.0) for i in range(245)], 244, factor=244.0), 1.0)
+near('_annualized 缺省年频率走 242 回退 -> 2**(242/244)-1',
+     ff._annualized([('d%03d' % i, 1.0 if i == 0 else 2.0) for i in range(245)], 244),
+     2 ** (242.0 / 244) - 1, 1e-15)
 
 # ---------- 5. 基准对比（日期对齐，21 个共同交易日） ----------
 FD = ['2026-01-%02d' % i for i in range(1, 22)]

@@ -43,7 +43,7 @@ except Exception:
 
 _PLUGIN_PKG_NAME = 'dsh-invest-research'
 # 单独拷走运行、又找不到本插件 package.json 时的回落值（与 package.json 同步）。
-_VERSION_FALLBACK = '0.6.12'
+_VERSION_FALLBACK = '0.6.13'
 
 
 def _resolve_version(start=None):
@@ -73,7 +73,12 @@ def _resolve_version(start=None):
 
 
 VERSION = _resolve_version()
+# 近 1 年窗口取多少根净值点 —— 只是窗口长度，**不是年化频率**。
 TRADING_DAYS = 244
+# 年化频率的回退默认值。标准 §3.2：年频率 = 样本期实际交易日总数 ÷ 样本年数（实算），
+# 算不出来（点数不足、日期不可解析）才回退 242。禁止把 244 / 252 当成年化频率硬编：
+# 年化收益、波动率、夏普、跟踪误差都取同一个实算值，并把来源写进口径 note。
+DEFAULT_ANNUALIZATION = 242.0
 
 # 时点纪律底座（与 stock-research 共用：../../stock-research/tools/pit.py）
 _SHARED_TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -772,7 +777,58 @@ def _ytd_return(series):
     return vals[-1][1] / base - 1.0
 
 
-def _annualized(series, n=None):
+def _factor_or_default(factor):
+    """年频率兜底：取不到可用实算值时返回 242，绝不返回 244 / 252。"""
+    try:
+        f = float(factor)
+    except (TypeError, ValueError):
+        return DEFAULT_ANNUALIZATION
+    return f if 0.0 < f < 1000.0 else DEFAULT_ANNUALIZATION
+
+
+def _annualization_factor(series):
+    """样本期实际交易日总数 ÷ 样本年数 → (年频率, 来源)，来源 ∈ {'实算','回退默认'}。
+
+    标准 §3.2：年频率按样本期实算，禁止硬编 252 / 244。用首尾日期算年数
+    （`(last - first).days / 365.25`），除以有效点数。以下情况回退 242 并标注来源：
+    有效点 < 2、日期不可解析、样本年数 ≤ 0、算出的频率不在日频合理区间
+    （20–400，防止把周频/月频或重复日期的样本当成日频年化）。
+    调用方必须把 `_annualization_note` 写进结果的口径 note。
+    """
+    dates = []
+    for row in series or []:
+        try:
+            d, v = row
+        except (TypeError, ValueError):
+            continue
+        if v is None:
+            continue
+        try:
+            dates.append(datetime.strptime(str(d)[:10], '%Y-%m-%d'))
+        except (TypeError, ValueError):
+            continue
+    if len(dates) < 2:
+        return DEFAULT_ANNUALIZATION, '回退默认'
+    first, last = min(dates), max(dates)
+    years = (last - first).days / 365.25
+    if years <= 0:
+        return DEFAULT_ANNUALIZATION, '回退默认'
+    factor = len(dates) / years
+    if not (20.0 <= factor <= 400.0):
+        return DEFAULT_ANNUALIZATION, '回退默认'
+    return factor, '实算'
+
+
+def _annualization_note(factor, source):
+    """口径 note 片段：`年频率=243.6（实算）` / `年频率=242.0（回退默认）`。"""
+    return '年频率=%.1f（%s）' % (_factor_or_default(factor), source)
+
+
+def _annualized(series, n=None, factor=None):
+    """n 个交易日区间收益按年频率折算成年化收益（小数）。
+
+    `factor` 必须来自 `_annualization_factor`；缺省走 242 回退，不得传 244 / 252。
+    """
     vals = [v for _, v in series if v is not None]
     if len(vals) < 2:
         return None
@@ -783,7 +839,7 @@ def _annualized(series, n=None):
     total = vals[-1] / vals[-1 - n]
     if total <= 0:
         return None
-    return total ** (TRADING_DAYS / float(n)) - 1.0
+    return total ** (_factor_or_default(factor) / float(n)) - 1.0
 
 
 def _daily_returns(series, n=None):
@@ -801,10 +857,32 @@ def _stdev(xs):
     return math.sqrt(var)
 
 
-def _volatility(series, n=TRADING_DAYS):
+def _volatility(series, n=TRADING_DAYS, factor=None):
+    """n 个日收益的样本标准差 × sqrt(年频率)；factor 同上，缺省 242。"""
     r = _daily_returns(series, n)
     sd = _stdev(r)
-    return None if sd is None else sd * math.sqrt(TRADING_DAYS)
+    return None if sd is None else sd * math.sqrt(_factor_or_default(factor))
+
+
+def _sharpe_excess(series, rf_pct, factor=None):
+    """超额收益口径夏普：mean(r_t − rf_t) / s(r_t − rf_t) × sqrt(年频率)。
+
+    与「年化收益 − 无风险」的算术相减不同，这里对**超额收益序列**取均值与标准差
+    （标准 §3.2）。rf 按几何方式日化：rf_d = (1 + rf_pct/100) ** (1/年频率) − 1；
+    rf_pct 或样本不足时返回 None。收益窗口取最近 round(年频率) 个日收益。
+    """
+    if rf_pct is None:
+        return None
+    f = _factor_or_default(factor)
+    r = _daily_returns(series, int(round(f)))
+    if len(r) < 2:
+        return None
+    rf_d = (1.0 + float(rf_pct) / 100.0) ** (1.0 / f) - 1.0
+    ex = [x - rf_d for x in r]
+    sd = _stdev(ex)
+    if not sd:
+        return None
+    return (sum(ex) / len(ex)) / sd * math.sqrt(f)
 
 
 def _max_drawdown(series, n=None):
@@ -848,6 +926,8 @@ def compare_with_benchmark(fund_series, bench_series):
                 '说明': '共同交易日不足 20 个，无法计算跟踪指标'}
     fv = [fmap[d] for d in common]
     bv = [bmap[d] for d in common]
+    # 跟踪误差的年化频率按**共同交易日**样本实算（不能用基金全样本，也不能硬编 244）。
+    te_factor, te_source = _annualization_factor([(d, fmap[d]) for d in common])
     fr = [fv[i] / fv[i - 1] - 1.0 for i in range(1, len(fv)) if fv[i - 1]]
     br = [bv[i] / bv[i - 1] - 1.0 for i in range(1, len(bv)) if bv[i - 1]]
     diff = [a - b for a, b in zip(fr, br)]
@@ -864,7 +944,9 @@ def compare_with_benchmark(fund_series, bench_series):
         '基金区间收益': round(fv[-1] / fv[0] - 1.0, 6),
         '基准区间收益': round(bv[-1] / bv[0] - 1.0, 6),
         '区间超额收益': round(excess, 6),
-        '年化跟踪误差': None if sd is None else round(sd * math.sqrt(TRADING_DAYS), 6),
+        '年化跟踪误差': None if sd is None else round(sd * math.sqrt(te_factor), 6),
+        '年频率': round(te_factor, 2),
+        '年频率来源': te_source,
         '上涨捕获率': None if up_cap is None else round(up_cap, 4),
         '下跌捕获率': None if dn_cap is None else round(dn_cap, 4),
         '口径': '按基金净值日与基准收盘日对齐后计算；基金净值含费用、基准为价格指数',
@@ -1135,6 +1217,9 @@ def build_payload(args):
 
     # ---------- 区间收益 / 风险指标 ----------
     if nav_series:
+        # 年化频率一次算好，年化收益 / 波动率 / 夏普 / 跟踪误差共用，来源随结果输出。
+        ann_factor, ann_source = _annualization_factor(nav_series)
+        ann_note = _annualization_note(ann_factor, ann_source)
         for label, n in WINDOWS:
             r = _window_return(nav_series, n)
             records.append(_rec('区间收益:%s' % label, None if r is None else round(r * 100, 4),
@@ -1147,18 +1232,18 @@ def build_payload(args):
         records.append(_rec('区间收益:%s' % SINCE, None if since is None else round(since * 100, 4),
                             '%', '区间', SRC_CALC, last_nav_date, kind='计算结果',
                             note='%s；%s%s' % (nav_caliber, nav_series[0][0], note_since)))
-        ann = _annualized(nav_series)
+        ann = _annualized(nav_series, factor=ann_factor)
         records.append(_rec('年化收益:%s' % SINCE, None if ann is None else round(ann * 100, 4),
                             '%', '区间', SRC_CALC, last_nav_date, kind='计算结果',
-                            note='按 244 交易日/年折算；%s%s' % (nav_caliber, note_since)))
-        ann1 = _annualized(nav_series, 244)
+                            note='%s；%s%s' % (ann_note, nav_caliber, note_since)))
+        ann1 = _annualized(nav_series, TRADING_DAYS, factor=ann_factor)
         records.append(_rec('年化收益:近1年', None if ann1 is None else round(ann1 * 100, 4),
                             '%', '区间', SRC_CALC, last_nav_date, kind='计算结果',
-                            note='按 244 交易日/年折算；%s' % nav_caliber))
-        vol = _volatility(nav_series, TRADING_DAYS)
+                            note='%s；窗口 %d 个交易日；%s' % (ann_note, TRADING_DAYS, nav_caliber)))
+        vol = _volatility(nav_series, TRADING_DAYS, factor=ann_factor)
         records.append(_rec('年化波动率:近1年', None if vol is None else round(vol * 100, 4),
                             '%', '区间', SRC_CALC, last_nav_date, kind='计算结果',
-                            note='日收益样本标准差×sqrt(244)；%s' % nav_caliber))
+                            note='日收益样本标准差×sqrt(年频率)；%s；%s' % (ann_note, nav_caliber)))
         mdd = _max_drawdown(nav_series)
         if mdd:
             records.append(_rec('最大回撤:%s' % SINCE, round(mdd['最大回撤'] * 100, 4), '%', '区间',
@@ -1186,11 +1271,19 @@ def build_payload(args):
                             note='严格小于当前净值的样本占比（与 stock-research 的 '
                                  'compute_percentile 同口径）；≠估值分位%s；%s'
                                  % (note_since, nav_window_note)))
-        if args.rf is not None and ann1 is not None and vol:
-            sharpe = (ann1 * 100 - args.rf) / (vol * 100)
-            records.append(_rec('夏普比率:近1年', round(sharpe, 4), '比率', '区间', SRC_CALC,
-                                last_nav_date, kind='计算结果',
-                                note='无风险利率取 %.2f%%（用户传入假设值）；%s' % (args.rf, nav_caliber)))
+        if args.rf is not None:
+            sharpe = _sharpe_excess(nav_series, args.rf, ann_factor)
+            if sharpe is not None:
+                records.append(_rec('夏普比率:近1年', round(sharpe, 4), '比率', '区间', SRC_CALC,
+                                    last_nav_date, kind='计算结果',
+                                    note='超额收益口径 mean(r_t−rf_t)/s(r_t−rf_t)×sqrt(年频率)，'
+                                         '非「年化收益−无风险利率」的算术相减；rf=%.2f%%'
+                                         '（用户传入假设值）按几何方式日化 (1+rf)^(1/年频率)−1；'
+                                         '窗口 %d 个日收益；%s；%s'
+                                         % (args.rf, int(round(_factor_or_default(ann_factor))),
+                                            ann_note, nav_caliber)))
+            else:
+                notes.append('夏普比率未计算：近 1 年日收益样本不足（<2）或波动为 0')
         else:
             notes.append('夏普比率未计算：未提供 --rf 无风险利率假设（禁止用默认值冒充）')
         for date_, rank, total in (pz.get('rank') or [])[-1:]:
@@ -1244,7 +1337,10 @@ def build_payload(args):
                         records.append(_rec('年化跟踪误差(计算)', round(
                             cmp_block['年化跟踪误差'] * 100, 4), '%', '区间', SRC_CALC,
                             cmp_block['结束日'], kind='计算结果',
-                            note='日超额收益标准差×sqrt(244)；与披露值口径可能不同，须并列'))
+                            note='日超额收益标准差×sqrt(年频率=%.1f（%s）)；共同交易日 %d 个；'
+                                 '与披露值口径可能不同，须并列'
+                                 % (cmp_block['年频率'], cmp_block['年频率来源'],
+                                    cmp_block['可比样本数'])))
                     for k in ('上涨捕获率', '下跌捕获率'):
                         if cmp_block.get(k) is not None:
                             records.append(_rec(k, cmp_block[k], '比率', '区间', SRC_CALC,
