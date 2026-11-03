@@ -15,7 +15,7 @@ What the fund actually holds vs. what its name and benchmark claim, and how that
 
 > Engine field 口径 traps that change conclusions — 「近N年年化」 is not
 > geometric, 「规模」 is merged across share classes — are documented in
-> `references/fund-return-traps.md（随本技能附带，与 `fund-screen` 技能内同一份）`. Recompute rather than
+> `../_shared/references/fund-return-traps.md（唯一副本；本技能 references/ 下的同名文件只是指针）`. Recompute rather than
 > quoting the field.
 
 ## Workflow

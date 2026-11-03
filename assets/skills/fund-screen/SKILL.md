@@ -48,7 +48,7 @@ If the engines disagree materially, show both result sets and the likely definit
 
 ### Step 2b: Re-check the engine's own fields before trusting them
 
-Read `references/fund-return-traps.md` first — two fund return fields can silently mean something other than their
+Read `../_shared/references/fund-return-traps.md` first — two fund return fields can silently mean something other than their
 name, and both change which funds make the list:
 
 - **「近N年年化」is not geometric annualised** (measured 1.94–2.13× the geometric
@@ -64,6 +64,8 @@ name, and both change which funds make the list:
 
 For the top results (cap at ~15), pull per fund via `hexin-fund.get_fund_profile` (size, inception, manager name, 管理费率), `wind-fund.get_fund_info` (托管费率/销售服务费率/业绩比较基准), `wind-fund.get_fund_performance` (window returns, 同类排名, 最大回撤, 夏普), and `wind-fund.get_fund_holdings` (股票/债券/存款 占基金资产净值比 at MRQ — same call also carries 行业配置 and top-10 if the shortlist needs them). **Carry the equity 仓位 into the table.** Two funds with the same 类型 label and similar returns can be running very different equity exposure, and a shortlist that does not show it invites a comparison between products that are not comparable. Manager **tenure dates** 走 `wind-fund.get_fund_info`（历任基金经理含任职期限）。
 
+**费率只登记，不用来排序或判优劣。** 费率三档是产品事实，不是筛选条件：它随份额类别变（C 类销售服务费是常态，A 类为空）、随渠道变（直销/代销）、还随生效日变，而 2026-01-01 起的销售费用规则与 2027-01-01 起的过渡口径又让同一只基金在两个年份的净成本不同。所以在筛选表里只如实登记「费率（管理·托管·销售服务）+ 份额类别 + 渠道 + 生效日」，**不得用费率高低排序、不得据此给推荐结论**；A/C 净成本要按持有期分段复算（`认（申）购费实收 + Σ销售服务费实收 − 应退`，跨 2027-01-01 切两段），规则与证据分级见 `../_shared/references/fee-rules-2026.md`，数值校验用 `fund-research/tools/fund_cost.py`。用户要按成本比 A/C 时，这是独立的一节，不是筛选表的一列。
+
 ### Step 4: Output
 
 Short-form is Markdown in-session. A screen the user will filter or hand on goes to `.xlsx` via `xlsx-author` — a screen result is that skill's **Class B** workbook, so it carries the `来源` worksheet and a `来源编号` column rather than per-cell comments, and the `口径与局限` block on the `来源` sheet states the criteria the engine actually executed versus what was asked. A written screen read goes to PDF via `report-render`; never hand-roll the PDF, because a hand-rolled one does not emit `[n]` as link annotations. 用户要 Word 时同样走 `report-render`（`DocxReport`，与 `Report` 同一套调用）——**要出 Word 就先载入 `report-render` 技能，再动手建**；手搓 python-docx / docx-js 会丢掉标签配色、`[n]` 跳转与封面页，机制与实测记录在那个技能里，不在这里重述。
@@ -71,7 +73,7 @@ Short-form is Markdown in-session. A screen the user will filter or hand on goes
 ```
 **基金筛选 — [执行口径的一句话]**（检索于 [date]）
 
-| 代码 | 名称(份额) | 类型 | 规模 | 经理(任职起) | [窗口]回报 | 最大回撤 | 股票仓位(报告期) | 费率 | 备注 |
+| 代码 | 名称(份额) | 类型 | 规模 | 经理(任职起) | [窗口]回报 | 最大回撤 | 股票仓位(报告期) | 费率(管理·托管·销售服务/类别/渠道/生效日) | 备注 |
 
 ## 覆盖范围与局限
 检索于 [date] · 引擎: [同花顺 get_fund_profile]

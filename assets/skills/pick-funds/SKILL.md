@@ -15,7 +15,7 @@ You do not recommend purchases, rate funds, or give personalized investment advi
 
 > 本技能是套件入口，承载三样东西：**工作模式路由**、**数据源优先级**、**全部技能共用的护栏**（溯源标签、引用与覆盖度规范）。套件内其他技能（`fund-screen` / `fund-profile` / `fund-watch` / `holdings-style` / `manager-profile` / `report-render` / `xlsx-author`）遇到「shared formatting policy」「citation policy」「coverage policy」时，指的就是本文件的对应小节。
 >
-> 基金收益字段的口径陷阱（「近N年年化」非几何年化、年化与累计共用列名、「规模」为合并规模）随 `fund-screen` 等 5 个技能各自附带在 `references/fund-return-traps.md`。
+> 基金收益字段的口径陷阱（「近N年年化」非几何年化、年化与累计共用列名、「规模」为合并规模）：正文唯一副本在 `_shared/references/fund-return-traps.md`，各基金技能 `references/` 下的同名文件只是指针。销售费用与 2026/2027 口径同理，见 `_shared/references/fee-rules-2026.md`。
 
 ## 工作模式（Choose The Work Mode）
 
@@ -34,7 +34,7 @@ You do not recommend purchases, rate funds, or give personalized investment advi
 
 | 要取什么 | 源 | 工具 | 返回 / 问法 |
 |---|---|---|---|
-| 基金筛选(近3年收益排名等,上千行) | 同花顺 | `hexin-fund.get_fund_profile` | 也返回基本面与费率栈(管理费率/托管费率/销售服务费率) |
+| 基金筛选(近3年收益排名等,上千行) | 同花顺 | `hexin-fund.get_fund_profile` | 也返回基本面与费率栈(管理费率/托管费率/销售服务费率)。**费率字段不含渠道（直销/代销）与口径（实收/应退/生效日）**，只能当产品标价，不能当持有人净成本；A/C 比较与跨 2027-01-01 的分段复算见 `_shared/references/fee-rules-2026.md` |
 | 净值、近1/3年收益率、累计净值 | 同花顺 | `hexin-fund.get_fund_market_performance` | — |
 | **历任**基金经理与任职区间(含离任日期) | 万得 | `wind-fund.get_fund_info` | `历任基金经理姓名和任职时间` 组合串,`\r\n` 分隔的组合串,离任者 `姓名(起-止)`、在任者 `姓名(起至今)`;实测某长期运作产品返回 `经理甲(20180102-20200615)…经理丁(20230301至今)`。同花顺 `get_fund_profile` **已不支持** `基金经理(历任)`,只余现任 `基金经理` |
 | 大类资产配置与持仓 | 同花顺 | `hexin-fund.get_fund_portfolio` | 股票/债券/存款市值与占基金资产比 |

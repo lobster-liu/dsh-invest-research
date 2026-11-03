@@ -15,7 +15,7 @@ One fund, fully evidenced. Answer the four questions an allocator asks: what is 
 
 > Engine field 口径 traps that change conclusions — 「近N年年化」 is not
 > geometric, 「规模」 is merged across share classes — are documented in
-> `references/fund-return-traps.md（随本技能附带，与 `fund-screen` 技能内同一份）`. Recompute rather than
+> `../_shared/references/fund-return-traps.md（唯一副本；本技能 references/ 下的同名文件只是指针）`. Recompute rather than
 > quoting the field.
 
 ## Workflow
@@ -25,6 +25,8 @@ One fund, fully evidenced. Answer the four questions an allocator asks: what is 
 `hexin-fund.get_fund_profile`: full name, code + share classes, type, inception, benchmark, size, fund company, current manager name. (Only the **current** manager comes from this call — 同花顺 no longer supports a `基金经理(历任)` indicator. The full roster with ranges is `wind-fund.get_fund_info`'s `历任基金经理姓名和任职时间` — ask for it and parse it, see `manager-profile`.) State which share class all following numbers use.
 
 费率三档分两处取:管理费率在 `hexin-fund.get_fund_profile`,托管费率与销售服务费率在 `wind-fund.get_fund_info`. Cost is a fact about the product, not a footnote. Quote all three with the share class they belong to — 销售服务费率 comes back blank on an A class and populated on a C class, which is exactly the difference a holder pays for, so a single "费率" number without its class and its components is not usable.
+
+**Then answer the cost question, not the rate question.** 费率字段只说明「基金收多少」，说明不了「持有人这笔钱在什么时候、通过哪个渠道、按哪个口径付出去」：同一只基金的直销与代销、2026 与 2027 年的申购、A 类与 C 类，净成本可以差一个数量级。凡涉及 A/C 选择、持有期盈亏平衡、跨 2027-01-01 的成本比较，先读 `../_shared/references/fee-rules-2026.md`（销售费用规则与证据分级，**唯一副本**），再用 `tools/fund_cost.py` 校验（不合规抛 `CostCaliberError`，代号 E1–E7）。费率表一律写全「份额类别 + 渠道 + 生效日 + 口径」四件，缺一即口径不明；只给「费率」两个字时，必须声明该字段**不含渠道与口径**，不能当持有人净成本用。
 
 ### Step 2: Performance & risk
 

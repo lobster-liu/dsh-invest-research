@@ -18,7 +18,7 @@ Findings are graded; the fund never is — this skill rates nothing and recommen
 
 > The engine-field 口径 traps that matter here (年化 vs 累计 sharing one column name,
 > 规模 merged across share classes) are in
-> `references/fund-return-traps.md（随本技能附带，与 `fund-screen` 技能内同一份）`. Read §0 before quoting any 区间收益.
+> `../_shared/references/fund-return-traps.md（唯一副本；本技能 references/ 下的同名文件只是指针）`. Read §0 before quoting any 区间收益.
 
 ## Workflow
 
@@ -103,9 +103,15 @@ risk-adjusted measures where returned.
 
 ### Step 6: Fees — the one change nobody notices
 
-`hexin-fund.get_fund_profile` carries 管理费率 / 托管费率 / 销售服务费率. A fee change is
-disclosed and permanent, and it compounds. Compare against the baseline and report any
-change; where fees are unchanged, one line saying so is enough.
+`hexin-fund.get_fund_profile` carries 管理费率 / 托管费率 / 销售服务费率；托管费与销售服务费也走 `wind-fund.get_fund_info`. A fee change is disclosed and permanent, and it compounds.
+
+**Version the fee stack; don't diff two snapshots.** The unit of comparison is `(基金代码, 费率变更生效日)`. 费率调整按公告的生效日切换，同一只基金在一个窗口里可以同时存在两个版本；拿「今天抓到的费率」减「上次抓到的费率」，会把「口径换了」误报成「涨价」。窗口内出现过费率变更生效日吗？报「旧值 → 新值 + 两个生效日」；查不到生效日就写「变更未见生效日」，**不要把抓取日当生效日**。
+
+**Both channels, separately.** 直销与代销不是同一笔钱：2026-01-01 起施行的销售费用规则（证监会公告〔2025〕22 号，**原文级**）与 2027-01-01 起的过渡口径（配套《通知》，**转述级、无文号**）并不对称地落在两腿上，合成一个「费率」会同时错两边。2027-01-01 之后的销售服务费是「先收后返」——照常收，赎回或合同终止时全额返还，**净成本为 0 但现金流不为 0**，所以「实收 / 应退」两列必须同时出现，只给一列即口径缺失（E2）；认（申）购费自 2027-01-01 起不得继续收取、且没有返还机制，此时直销腿实收 > 0 就是口径错误（E1），不是「打折」也不是「后端免收」。
+
+**Crossing 2027-01-01 forces a recheck.** 持有期起点早于、终点晚于 2027-01-01 的，必须分段：2026 段按实收，2027 段按「实收 − 应退」。用单一费率乘整个持有期，是本技能最容易被持仓人抓到的错误。
+
+规则、条文与证据分级见 `../_shared/references/fee-rules-2026.md`；数值校验用 `fund-research/tools/fund_cost.py`（`validate_fee_leg` / `split_holding_period` / `net_cost` / `fee_version_key`）。费率未变时一行说明即可，但要写清「哪个版本、哪个渠道未变」。
 
 ### Step 7: Grade the findings
 
@@ -155,8 +161,11 @@ unspecified long-form stays PDF (the suite's shared formatting policy；见 `pic
 | 基金 | 区间收益% | 同类排名(N=) | 相对基准% | 最大回撤% | 源 [n] |
 |---|---|---|---|---|---|
 
-**五、费率**
-[无变化 / 变化明细]
+**五、费率**（按 `(基金代码, 费率变更生效日)` 分版本; 直销/代销分列; 跨 2027-01-01 分段）
+| 基金 | 渠道 | 版本(生效日) | 管理费% | 托管费% | 销售服务费% | 认申购费实收/应退 | 净成本% | 源 [n] |
+|---|---|---|---|---|---|---|---|---|
+
+[无变化: 哪个版本、哪个渠道未变 / 变化明细: 旧值 → 新值 + 生效日 / 未取得生效日时明写]
 
 ## 覆盖范围与局限
 检索于: [date] · 窗口: [起]—[止] · 口径/委托用途: [如 持仓基金季度复核]
@@ -169,7 +178,7 @@ unspecified long-form stays PDF (the suite's shared formatting policy；见 `pic
 | 大类资产配置与持仓 |  | wind-fund.get_fund_holdings | [报告期] |
 | 区间收益与同类排名 | 口径 [年化/累计] | 同花顺 hexin-fund.get_fund_market_performance | [date] |
 | 基准指数同期 |  | 同花顺 hexin-index.index_data | [date] |
-| 费率 |  | 同花顺 hexin-fund.get_fund_profile | [date] |
+| 费率（含渠道·生效日·口径） |  | 同花顺 hexin-fund.get_fund_profile + 万得 wind-fund.get_fund_info；规则见 `_shared/references/fee-rules-2026.md` | [date] |
 
 本次未能覆盖: [不可用的源与基金, 以及它们本应覆盖的检查项]
 数据滞后性: 持仓披露滞后(报告期 [date] ≠ 检索于 [date]);持有人结构为半年度披露;
