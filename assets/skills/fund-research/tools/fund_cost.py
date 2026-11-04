@@ -17,10 +17,11 @@ fund_cost.py — 基金销售费用「净成本」的口径校验（2026 新规�
   · 销售服务费 —— 第十一条上限 + 2027 过渡（先收后返，净成本 0 但现金流不为 0）
 管理费/托管费已从净值中扣除，不重复计入；赎回费全额计入基金财产，不进 A/C 净成本对比。
 
-已知边界（fee-rules-2026.md §7）：`validate_fee_leg` 没有持有期输入，2027-01-01 及以后对销售服务费
-不分渠道都要求「应退 = 实收」（E3）。真实合同里**代销腿持有 ≤1 年的部分是「全部确认为应支付」、不返还**
-（路博迈中国动力 2026-07-06 公告，单例），用它算会得到 E3 误判。该分支**当前不支持**：遇到就按降级
-输出「费用不可精确复算」，不得声称支持；补 `holding_days` / `contract_regime` 参数后再说。
+已知边界（fee-rules-2026.md §7）：持有期决定「先收后返」是否适用——**直销腿不问持有期**，2027-01-01 及
+以后一律要求「应退 = 实收」；**代销腿必须给 `holding_days`**：持有 ≤365 天的部分「全部确认为应支付」、
+不返还（净成本 = 实收），持有 >365 天的部分才把 2027-01-01 起计提的费用全额返还。该分支的原文依据是
+**单例合同公告**（路博迈中国动力 2026-07-06，另有同向个案），不是《通知》原文，所以：只能按「合同已声明
+这一形态」建模，不得当成全部代销基金的默认行为。
 """
 from datetime import datetime, timedelta
 
@@ -34,6 +35,8 @@ CHANNELS = ('直销', '代销')
 FEE_KINDS = ('认申购费', '销售服务费')
 #: 规则/费率未核到时的结论短语（E7）：禁止估算
 UNVERIFIED = '费用不可精确复算'
+#: 代销腿「先收后返」的持有期分界（连续持有天数，含当日）——合同分支，见 §2 第 3 条
+REFUND_MIN_HOLDING_DAYS = 365
 _EPS = 1e-9
 
 
@@ -64,6 +67,16 @@ def _amount(value, what):
 
 def _iso(d):
     return d.strftime('%Y-%m-%d')
+
+
+def _days(value):
+    try:
+        n = int(round(float(value)))
+    except (TypeError, ValueError):
+        raise CostCaliberError('E7', '持有期缺少数值：%r（须按天计）' % (value,))
+    if n < 0:
+        raise CostCaliberError('E7', '持有期不得为负：%r' % (value,))
+    return n
 
 
 def in_transition(on_date):
@@ -98,12 +111,15 @@ def fee_version_key(fund_code, effective_date):
     return (code, _iso(_date(effective_date)))
 
 
-def validate_fee_leg(channel, trade_date, fee_kind, received, refundable=None):
+def validate_fee_leg(channel, trade_date, fee_kind, received, refundable=None, holding_days=None):
     """校验一条费用腿 → {渠道, 费用种类, 发生日, 实收, 应退, 净成本, 口径}。
 
     `received` / `refundable` 是以金额计的实际收取与应返（同币种、同期间）。
-    销售服务费在 2027-01-01 及以后**必须同时给出应退**且等于实收（E2/E3）；
-    2027 之前给出应退即违反「存量不返还」（E7）。
+    销售服务费在 2027-01-01 及以后**必须同时给出应退**（E2）；
+    **代销腿还必须给 `holding_days`**（赎回时的连续持有天数）：
+      · ≤365 天：所计提的销售服务费「全部确认为应支付」，应退必须为 0（否则 E3），净成本 = 实收；
+      · >365 天：2027-01-01 起计提的部分全额返还，应退必须 = 实收（否则 E3），净成本 = 0。
+    直销腿不问持有期，2027 起一律要求应退 = 实收（E3）。2027 之前给出应退即违反「存量不返还」（E7）。
     """
     if channel not in CHANNELS:
         raise CostCaliberError('E7', '渠道必须是 %s 之一，收到 %r' % ('/'.join(CHANNELS), channel))
@@ -133,9 +149,33 @@ def validate_fee_leg(channel, trade_date, fee_kind, received, refundable=None):
     else:
         ref = _amount(refundable, '应退')
     if d >= _date(NOTICE_EFFECTIVE):
-        if abs(ref - rec) > max(_EPS, abs(rec) * 1e-9):
+        tol = max(_EPS, abs(rec) * 1e-9)
+        if channel == '代销':
+            if holding_days is None:
+                raise CostCaliberError(
+                    'E7', '%s 代销腿销售服务费缺持有期（holding_days）：≤365 天不返还、>365 天返还，'
+                          '缺了分支不可判' % _iso(d))
+            hd = _days(holding_days)
+            if hd <= REFUND_MIN_HOLDING_DAYS:
+                if ref > tol:
+                    raise CostCaliberError(
+                        'E3', '%s 代销腿持有 %d 天（≤%d）：所计提的销售服务费全部确认为应支付，'
+                              '应退必须为 0，收到 %.6f' % (_iso(d), hd, REFUND_MIN_HOLDING_DAYS, ref))
+                return {'渠道': channel, '费用种类': fee_kind, '发生日': _iso(d),
+                        '实收': rec, '应退': 0.0, '净成本': rec,
+                        '口径': '代销持有 ≤%d 天：全部确认为应支付，不返还（净成本 = 实收；合同分支）'
+                                % REFUND_MIN_HOLDING_DAYS}
+            if abs(ref - rec) > tol:
+                raise CostCaliberError(
+                    'E3', '%s 代销腿持有 %d 天（>%d）：2027-01-01 起继续计提的部分应全额返还，'
+                          '应退 %.6f ≠ 实收 %.6f' % (_iso(d), hd, REFUND_MIN_HOLDING_DAYS, ref, rec))
+            return {'渠道': channel, '费用种类': fee_kind, '发生日': _iso(d),
+                    '实收': rec, '应退': ref, '净成本': 0.0,
+                    '口径': '先收后返（代销持有 >%d 天）：净成本 0，现金流不为 0（两列并存）'
+                            % REFUND_MIN_HOLDING_DAYS}
+        if abs(ref - rec) > tol:      # 直销：不问持有期
             raise CostCaliberError(
-                'E3', '%s 销售服务费应退 %.6f ≠ 实收 %.6f：执行层要求全额返还'
+                'E3', '%s 销售服务费应退 %.6f ≠ 实收 %.6f：执行层要求全额返还（直销腿不问持有期）'
                 % (_iso(d), ref, rec))
         return {'渠道': channel, '费用种类': fee_kind, '发生日': _iso(d),
                 '实收': rec, '应退': ref, '净成本': 0.0,
